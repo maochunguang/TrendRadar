@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrendRadar 设置中心</title>
+  <link rel="stylesheet" href="/settings/style.css">
+</head>
+<body>
+  <header>
+    <h1>📡 TrendRadar 设置中心 <span class="version" id="version"></span></h1>
+    <span class="auth-badge" id="authBadge">检测中…</span>
+    <button class="btn primary" id="btnRunNow">▶ 立即运行</button>
+    <button class="btn" id="btnTestNotify">🔔 测试通知</button>
+  </header>
+
+  <div class="layout">
+    <nav id="nav"></nav>
+    <main>
+      <!-- 概览 -->
+      <section class="panel" id="panel-overview">
+        <div class="welcome-tip" id="welcomeTip"></div>
+        <div class="status-grid" id="statusGrid"></div>
+        <div class="card">
+          <h2>📜 最近一次运行日志</h2>
+          <p class="card-hint">含定时任务与手动触发；更多日志见「运行日志」标签页</p>
+          <pre class="log-view" id="overviewLog">加载中…</pre>
+        </div>
+      </section>
+
+      <!-- 表单类分区（JS 渲染） -->
+      <section class="panel" id="panel-basic"></section>
+      <section class="panel" id="panel-schedule"></section>
+      <section class="panel" id="panel-sources"></section>
+      <section class="panel" id="panel-report"></section>
+      <section class="panel" id="panel-display"></section>
+      <section class="panel" id="panel-notification"></section>
+      <section class="panel" id="panel-ai"></section>
+      <section class="panel" id="panel-storage"></section>
+      <section class="panel" id="panel-advanced"></section>
+
+      <!-- 文本文件编辑 -->
+      <section class="panel" id="panel-textedit">
+        <div class="card">
+          <h2>📝 文本文件编辑</h2>
+          <p class="card-hint">关键词、时间线、AI 提示词等纯文本配置；保存前自动备份</p>
+          <div class="file-tabs" id="fileTabs"></div>
+          <details class="syntax-help" id="freqSyntaxHelp" style="display:none">
+            <summary>frequency_words.txt 语法说明</summary>
+            <pre>- 每个词组由空行分隔，词组内任意词命中即匹配
+- 普通词：直接写入      +词：必须词（全部必须词都要命中）
+- !词：过滤词（命中则排除）   @数字：该词组最多显示条数
+- [WORD_GROUPS] 词组区域（默认）   [GLOBAL_FILTER] 全局过滤词区域
+- 支持正则：/pattern/  支持别名：词[别名]</pre>
+          </details>
+          <textarea class="code" id="textEditor" spellcheck="false"></textarea>
+          <div class="btn-row">
+            <button class="btn primary" id="btnSaveText">💾 保存文件</button>
+            <span id="textEditorStatus" style="color:var(--text-muted);font-size:12.5px"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 原始 YAML -->
+      <section class="panel" id="panel-raw">
+        <div class="card">
+          <h2>🛠 原始 config.yaml 编辑</h2>
+          <p class="card-hint">
+            兜底编辑器，可修改所有配置项（密钥字段已脱敏，无法通过此处修改）。
+            保存前进行语法与结构校验。
+          </p>
+          <textarea class="code" id="rawEditor" spellcheck="false"></textarea>
+          <div class="btn-row">
+            <button class="btn primary" id="btnSaveRaw">💾 保存 config.yaml</button>
+            <span style="color:var(--text-muted);font-size:12.5px">表单分区覆盖不到的项（如 ai.extra_params）可在此编辑</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 运行日志 -->
+      <section class="panel" id="panel-logs">
+        <div class="card">
+          <h2>📋 运行日志</h2>
+          <p class="card-hint">最近 20 次运行记录（手动触发与定时任务）；该目录无法通过报告页面直接访问</p>
+          <div class="file-tabs" id="logTabs"></div>
+          <pre class="log-view" id="logView">选择左侧日志查看内容</pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 登录弹窗 -->
+  <div class="modal-mask" id="loginMask">
+    <div class="modal">
+      <h3>🔐 管理员登录</h3>
+      <div class="modal-body">
+        <p style="color:var(--text-muted)">本服务已启用 ADMIN_TOKEN 保护，请输入访问令牌。</p>
+        <input type="password" id="loginToken" placeholder="ADMIN_TOKEN" style="margin:10px 0">
+        <div class="btn-row">
+          <button class="btn primary" id="btnLogin">登录</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 保存确认弹窗 -->
+  <div class="modal-mask" id="confirmMask">
+    <div class="modal">
+      <h3>💾 确认保存</h3>
+      <div class="modal-body" id="confirmBody"></div>
+      <div class="btn-row">
+        <button class="btn primary" id="btnConfirmSave">确认保存</button>
+        <button class="btn" id="btnCancelSave">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <script src="/settings/app.js"></script>
+</body>
+</html>

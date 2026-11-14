@@ -37,9 +37,9 @@ case "${RUN_MODE:-cron}" in
         python -m trendradar
     fi
 
-    # 启动 Web 服务器
-    echo "🌐 启动 Web 服务器..."
-    python manage.py start_webserver
+    # 启动 Web 设置中心（同时托管 output 报告静态文件）
+    echo "🌐 启动 Web 设置中心..."
+    python manage.py start_webadmin
 
     echo "⏰ 启动supercronic: $CRON_EXPR"
     echo "🎯 supercronic 将作为 PID 1 运行"

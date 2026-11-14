@@ -16,6 +16,7 @@ _raw_port = int(os.environ.get("WEBSERVER_PORT", "8080"))
 WEBSERVER_PORT = _raw_port if 1 <= _raw_port <= 65535 else 8080
 WEBSERVER_DIR = "/app/output"
 WEBSERVER_PID_FILE = "/tmp/webserver.pid"
+WEBADMIN_PID_FILE = "/tmp/webadmin.pid"
 
 
 def manual_run():
@@ -642,6 +643,122 @@ def webserver_status():
         print(f"  ❌ 状态检查失败: {e}")
 
 
+def _is_webadmin_process(pid: int) -> bool:
+    """检查 pid 是否是 trendradar.webadmin 进程。"""
+    cmdline = _read_proc_cmdline(pid)
+    if not cmdline:
+        return False
+    return "trendradar.webadmin" in cmdline and str(WEBSERVER_PORT) in cmdline
+
+
+def _is_webadmin_healthy(pid: int) -> bool:
+    """webadmin 进程存活且端口可访问。"""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+
+    if not _is_webadmin_process(pid):
+        return False
+
+    try:
+        import urllib.request
+        req = urllib.request.Request(f"http://127.0.0.1:{WEBSERVER_PORT}/api/status", method="GET")
+        urllib.request.urlopen(req, timeout=3)
+        return True
+    except Exception:
+        # 进程在但接口未就绪：稍等重试一次
+        time.sleep(1)
+        try:
+            urllib.request.urlopen(req, timeout=3)
+            return True
+        except Exception:
+            return False
+
+
+def _cleanup_webadmin_pid():
+    """清理失效的 webadmin PID 文件"""
+    if not Path(WEBADMIN_PID_FILE).exists():
+        return
+    try:
+        with open(WEBADMIN_PID_FILE, 'r') as f:
+            int(f.read().strip())
+        os.remove(WEBADMIN_PID_FILE)
+        print(f"  🧹 清理失效的 webadmin PID 文件")
+    except Exception:
+        try:
+            os.remove(WEBADMIN_PID_FILE)
+        except OSError:
+            pass
+
+
+def start_webadmin():
+    """启动 Web 设置中心（托管设置页面 + output 报告 + 管理 API）"""
+    print(f"🌐 启动 Web 设置中心 (端口: {WEBSERVER_PORT})...")
+    auth = "已启用" if os.environ.get("ADMIN_TOKEN", "").strip() else "未设置（页面只读模式）"
+    print(f"  🔒 ADMIN_TOKEN: {auth}")
+
+    # 检查是否已经运行
+    if Path(WEBADMIN_PID_FILE).exists():
+        try:
+            with open(WEBADMIN_PID_FILE, 'r') as f:
+                old_pid = int(f.read().strip())
+            if _is_webadmin_healthy(old_pid):
+                print(f"  ⚠️ Web 设置中心已在运行 (PID: {old_pid})")
+                print(f"  💡 访问: http://localhost:{WEBSERVER_PORT}/settings")
+                return
+            # 仅终止确认是 webadmin 的进程；PID 已被复用时不误杀
+            try:
+                os.kill(old_pid, 0)
+                if _is_webadmin_process(old_pid):
+                    os.kill(old_pid, signal.SIGTERM)
+                    time.sleep(0.5)
+            except OSError:
+                pass
+            _cleanup_webadmin_pid()
+        except Exception:
+            _cleanup_webadmin_pid()
+
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "-m", "trendradar.webadmin"],
+            cwd="/app",
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+            start_new_session=True,
+        )
+
+        # 等待服务就绪
+        for _ in range(10):
+            time.sleep(0.5)
+            try:
+                import urllib.request
+                urllib.request.urlopen(
+                    f"http://127.0.0.1:{WEBSERVER_PORT}/api/status", timeout=2
+                )
+                break
+            except Exception:
+                if process.poll() is not None:
+                    break
+        else:
+            if process.poll() is not None:
+                print(f"  ❌ Web 设置中心启动失败 (退出码: {process.returncode})")
+                return
+
+        if process.poll() is not None:
+            print(f"  ❌ Web 设置中心启动失败")
+            return
+
+        with open(WEBADMIN_PID_FILE, 'w') as f:
+            f.write(str(process.pid))
+
+        print(f"  ✅ Web 设置中心已启动 (PID: {process.pid})")
+        print(f"  ⚙️ 设置页面: http://localhost:{WEBSERVER_PORT}/settings")
+        print(f"  📄 报告首页: http://localhost:{WEBSERVER_PORT}/")
+    except Exception as e:
+        print(f"  ❌ 启动失败: {e}")
+
+
 def show_help():
     """显示帮助信息"""
     help_text = """
@@ -654,7 +771,8 @@ def show_help():
   files            - 显示输出文件
   logs             - 实时查看日志
   restart          - 重启说明
-  start_webserver  - 启动 Web 服务器托管 output 目录
+  start_webadmin   - 启动 Web 设置中心（设置页 + 报告托管）
+  start_webserver  - 启动旧版静态 Web 服务器（仅 output 目录）
   stop_webserver   - 停止 Web 服务器
   webserver_status - 查看 Web 服务器状态
   help             - 显示此帮助
@@ -712,6 +830,7 @@ def main():
         "files": show_files,
         "logs": show_logs,
         "restart": restart_supercronic,
+        "start_webadmin": start_webadmin,
         "start_webserver": start_webserver,
         "stop_webserver": stop_webserver,
         "webserver_status": webserver_status,
