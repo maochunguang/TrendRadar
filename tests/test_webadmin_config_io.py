@@ -235,6 +235,33 @@ class SaveStructuredTests(ConfigIOBase):
         self.assertIn("config.yaml", content)
         self.assertIn("1.2.3.4", content)
 
+    def test_list_append_with_trailing_comments_keeps_structure(self):
+        """回归：feeds 列表带尾部注释块时，追加条目不得错位到顶层文档"""
+        fixture = FIXTURE_CONFIG + """
+    # 自定义源示例
+    # - id: "custom-feed"
+    #   name: "自定义源"
+"""
+        self.config_path.write_text(fixture, encoding="utf-8")
+
+        data = config_io.get_structured_config()["data"]
+        data["rss"]["feeds"].append({"id": "new-feed", "name": "新源", "url": "https://x.example/feed"})
+        ok, errors, _, _ = config_io.save_structured_config(data)
+        self.assertTrue(ok, msg=f"errors={errors}")
+
+        parsed = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        # 顶层文档不能混入 feeds 条目（曾出现的错位 bug）
+        self.assertNotIn("id", {k for k in parsed.keys() if k == "id"} or set())
+        self.assertIsInstance(parsed.get("report"), dict, "report 段必须仍是映射")
+        feeds = parsed["rss"]["feeds"]
+        self.assertEqual(len(feeds), 2)  # 原 hacker-news + 新增
+        self.assertEqual(feeds[-1]["id"], "new-feed")
+        # 原有条目仍在
+        self.assertEqual(feeds[0]["id"], "hacker-news")
+        # 新增条目不得出现在顶层
+        top_keys = set(parsed.keys())
+        self.assertNotIn("name", top_keys)
+
     def test_list_merge_by_id_keeps_comments_and_order(self):
         data = self._load_current()
         sources = data["platforms"]["sources"]
@@ -400,6 +427,81 @@ class RunnerTests(ConfigIOBase):
     def test_find_processes_no_crash(self):
         result = runner.find_trendradar_processes()
         self.assertIsInstance(result, list)
+
+
+class EditableSecretsTests(ConfigIOBase):
+    """EDIT_SECRETS=true 时密钥可编辑的场景"""
+
+    def _with_edit_secrets(self):
+        return patch.dict(os.environ, {"EDIT_SECRETS": "true"})
+
+    def test_get_structured_returns_real_values(self):
+        with self._with_edit_secrets():
+            result = config_io.get_structured_config()
+            self.assertTrue(result["secrets_editable"])
+            self.assertEqual(result["readonly_fields"], [])
+            self.assertEqual(result["data"]["ai"]["api_key"], "sk-secret-abc123")
+
+    def test_get_raw_unmasked(self):
+        with self._with_edit_secrets():
+            text = config_io.get_config_raw()
+            self.assertIn("sk-secret-abc123", text)
+            self.assertNotIn(config_io.MASK_TOKEN, text)
+
+    def test_save_credential_change_succeeds(self):
+        with self._with_edit_secrets():
+            data = config_io.get_structured_config()["data"]
+            data["ai"]["api_key"] = "sk-new-key-456"
+            ok, errors, _, changed = config_io.save_structured_config(data)
+            self.assertTrue(ok, msg=f"errors={errors}")
+            self.assertIn("sk-new-key-456", self.config_path.read_text(encoding="utf-8"))
+            self.assertTrue(any(c["path"] == "ai.api_key" for c in changed))
+
+    def test_save_raw_credential_change_succeeds(self):
+        with self._with_edit_secrets():
+            text = config_io.get_config_raw().replace("sk-secret-abc123", "sk-raw-key-789")
+            ok, errors, _ = config_io.save_config_raw(text)
+            self.assertTrue(ok, msg=f"errors={errors}")
+            self.assertIn("sk-raw-key-789", self.config_path.read_text(encoding="utf-8"))
+
+    def test_cleared_credential_writes_empty(self):
+        with self._with_edit_secrets():
+            data = config_io.get_structured_config()["data"]
+            data["ai"]["api_key"] = ""  # 可编辑模式下允许清空
+            ok, errors, _, _ = config_io.save_structured_config(data)
+            self.assertTrue(ok, msg=f"errors={errors}")
+            self.assertEqual(yaml.safe_load(self.config_path.read_text(encoding="utf-8"))["ai"]["api_key"], "")
+
+    def test_env_shadowed_credential_still_ignored(self):
+        envs = {"EDIT_SECRETS": "true", "AI_API_KEY": "env-key-000"}
+        with patch.dict(os.environ, envs):
+            data = config_io.get_structured_config()["data"]
+            data["ai"]["api_key"] = "sk-page-key"
+            ok, errors, warnings, _ = config_io.save_structured_config(data)
+            self.assertTrue(ok, msg=f"errors={errors}")
+            self.assertTrue(any("AI_API_KEY" in w for w in warnings))
+            # 文件保持原值，页面修改被忽略
+            self.assertIn("sk-secret-abc123", self.config_path.read_text(encoding="utf-8"))
+
+    def test_audit_log_redacts_credential_values(self):
+        with self._with_edit_secrets():
+            data = config_io.get_structured_config()["data"]
+            data["ai"]["api_key"] = "sk-audit-secret"
+            ok, _, _, _ = config_io.save_structured_config(data)
+            self.assertTrue(ok)
+            audit = Path("output/logs/config-audit.jsonl").read_text(encoding="utf-8")
+            self.assertIn("ai.api_key", audit)
+            self.assertNotIn("sk-audit-secret", audit)
+            self.assertIn("***", audit)
+
+    def test_stale_mask_token_restored_when_editable(self):
+        # 页面在开关切换前加载过（带掩码），保存时掩码应还原而不是写入字面量
+        with self._with_edit_secrets():
+            data = config_io.get_structured_config()["data"]
+            data["ai"]["api_key"] = config_io.MASK_TOKEN
+            ok, errors, _, _ = config_io.save_structured_config(data)
+            self.assertTrue(ok, msg=f"errors={errors}")
+            self.assertIn("sk-secret-abc123", self.config_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

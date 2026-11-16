@@ -197,6 +197,15 @@ def _load_rss_config(config_data: Dict) -> Dict:
         print(f"[警告] RSS freshness_filter.max_age_days 格式错误 ({raw_max_age})，使用默认值 3")
         max_age_days = 3
 
+    # 摘要显示配置
+    raw_summary = rss.get("summary", {}) or {}
+    try:
+        summary_max_length = int(raw_summary.get("max_length", 100))
+    except (ValueError, TypeError):
+        summary_max_length = 100
+    if summary_max_length < 0:
+        summary_max_length = 0
+
     # RSS 配置直接从 config.yaml 读取，不再支持环境变量
     return {
         "ENABLED": rss.get("enabled", False),
@@ -208,6 +217,11 @@ def _load_rss_config(config_data: Dict) -> Dict:
         "FRESHNESS_FILTER": {
             "ENABLED": freshness_filter.get("enabled", True),  # 默认启用
             "MAX_AGE_DAYS": max_age_days,
+        },
+        "SUMMARY": {
+            "ENABLED": raw_summary.get("enabled", False),
+            "MAX_LENGTH": summary_max_length,
+            "FULLTEXT_FALLBACK": raw_summary.get("fulltext_fallback", False),
         },
     }
 
@@ -230,9 +244,35 @@ def _load_display_config(config_data: Dict) -> Dict:
     if not region_order:
         region_order = default_region_order
 
+    # 每条推送消息最大条目数（0=不限制）
+    raw_max_items = display.get("max_items_per_message", 0)
+    try:
+        max_items_per_message = int(raw_max_items)
+    except (ValueError, TypeError):
+        max_items_per_message = 0
+    if max_items_per_message < 0:
+        max_items_per_message = 0
+
+    # 跨平台同事件聚合配置
+    raw_clustering = display.get("event_clustering", {}) or {}
+    try:
+        similarity_threshold = float(raw_clustering.get("similarity_threshold", 0.6))
+    except (ValueError, TypeError):
+        similarity_threshold = 0.6
+    if not 0 < similarity_threshold <= 1:
+        print(f"[警告] event_clustering.similarity_threshold 超出范围 ({similarity_threshold})，使用默认值 0.6")
+        similarity_threshold = 0.6
+
     return {
         # 区域显示顺序
         "REGION_ORDER": region_order,
+        # 每条推送消息最大条目数
+        "MAX_ITEMS_PER_MESSAGE": max_items_per_message,
+        # 跨平台同事件聚合
+        "EVENT_CLUSTERING": {
+            "ENABLED": raw_clustering.get("enabled", False),
+            "SIMILARITY_THRESHOLD": similarity_threshold,
+        },
         # 区域开关
         "REGIONS": {
             "HOTLIST": regions.get("hotlist", True),
@@ -325,6 +365,25 @@ def _load_ai_filter_config(config_data: Dict) -> Dict:
         "UPDATE_TAGS_PROMPT_FILE": ai_filter.get("update_tags_prompt_file", "update_tags_prompt.txt"),
         "RECLASSIFY_THRESHOLD": ai_filter.get("reclassify_threshold", 0.6),
         "MIN_SCORE": float(ai_filter.get("min_score", 0)),
+    }
+
+
+def _load_ai_summary_config(config_data: Dict) -> Dict:
+    """加载热榜条目 AI 一句话摘要配置"""
+    summary_config = config_data.get("ai_summary", {}) or {}
+
+    def _int(key: str, default: int) -> int:
+        try:
+            return int(summary_config.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "ENABLED": summary_config.get("enabled", False),
+        "MAX_ITEMS": _int("max_items", 20),
+        "MAX_CHARS": _int("max_chars", 60),
+        "BATCH_SIZE": _int("batch_size", 10),
+        "BATCH_INTERVAL": _int("batch_interval", 2),
     }
 
 
@@ -587,6 +646,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     # AI 智能筛选配置
     config["AI_FILTER"] = _load_ai_filter_config(config_data)
+
+    # 热榜条目 AI 一句话摘要
+    config["AI_SUMMARY"] = _load_ai_summary_config(config_data)
 
     # 筛选策略配置
     config["FILTER"] = _load_filter_config(config_data)

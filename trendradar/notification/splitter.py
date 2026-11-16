@@ -132,6 +132,64 @@ DEFAULT_BATCH_SIZES = {
 DEFAULT_REGION_ORDER = ["hotlist", "rss", "new_items", "standalone", "ai_analysis"]
 
 
+def apply_item_cap_to_groups(groups: Optional[List[Dict]], cap: int) -> Optional[List[Dict]]:
+    """
+    限制一个区域（热榜/RSS/新增统计）在推送中展示的总条目数
+
+    超出上限的条目会被移除，并在截断位置插入一条提示行
+    （"… 还有 N 条未展示"）；上限之后的整组条目会被移除，
+    数量计入提示行。不修改传入对象，返回新列表。
+
+    Args:
+        groups: 区域分组列表，每组形如 {"word"/"source_name": ..., "titles": [...]}
+        cap: 每条消息最大条目数，0 或负数表示不限制
+
+    Returns:
+        截断后的分组列表（浅拷贝结构）
+    """
+    if cap <= 0 or not groups:
+        return groups
+
+    remaining = cap
+    result: List[Dict] = []
+    hidden = 0
+    truncate_at = None  # (result 下标, 保留条数)
+
+    for group in groups:
+        titles = group.get("titles", [])
+        if remaining <= 0:
+            hidden += len(titles)
+            continue
+        if len(titles) <= remaining:
+            result.append(group)
+            remaining -= len(titles)
+            continue
+
+        kept = list(titles[:remaining])
+        result.append({**group, "titles": kept})
+        truncate_at = (len(result) - 1, len(kept))
+        hidden += len(titles) - remaining
+        remaining = 0
+
+    if hidden > 0 and truncate_at is not None:
+        gi, _ = truncate_at
+        group = result[gi]
+        notice = {
+            "title": f"… 还有 {hidden} 条未展示，完整内容见网页报告",
+            "source_name": "提示",
+            "time_display": "",
+            "count": 1,
+            "ranks": [],
+            "rank_threshold": 0,
+            "url": "",
+            "mobile_url": "",
+            "is_new": False,
+        }
+        result[gi] = {**group, "titles": list(group["titles"]) + [notice]}
+
+    return result
+
+
 def split_content_into_batches(
     report_data: Dict,
     format_type: str,
@@ -1822,6 +1880,7 @@ def _format_standalone_rss_item(
     url = item.get("url", "")
     published_at = item.get("published_at", "")
     author = item.get("author", "")
+    summary = item.get("summary", "")
 
     # 使用友好时间格式
     friendly_time = ""
@@ -1866,6 +1925,13 @@ def _format_standalone_rss_item(
             item_line = f"  {index}. {title}"
         if meta_str:
             item_line += f" `{meta_str}`"
+
+    # 摘要行（rss.summary.enabled 时独立展示区附带）
+    if summary:
+        if format_type == "feishu":
+            item_line += f"\n     <font color='grey'>💬 {summary}</font>"
+        else:
+            item_line += f"\n     💬 {summary}"
 
     item_line += "\n"
     return item_line

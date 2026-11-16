@@ -32,6 +32,7 @@ from trendradar.notification.renderer import (
 )
 from trendradar.notification.splitter import (
     split_content_into_batches,
+    apply_item_cap_to_groups,
     DEFAULT_BATCH_SIZES,
 )
 from trendradar.notification.senders import (
@@ -61,6 +62,7 @@ __all__ = [
     "render_dingtalk_content",
     # 消息分批
     "split_content_into_batches",
+    "apply_item_cap_to_groups",
     "DEFAULT_BATCH_SIZES",
     # 消息发送器
     "send_to_feishu",

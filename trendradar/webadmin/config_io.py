@@ -5,13 +5,16 @@
 负责 Web 设置中心的配置文件读写：
 - ruamel.yaml round-trip 读写（保留注释）
 - 写入前校验、自动备份、审计日志
-- 字段分类：密钥字段（只读+脱敏）、环境变量覆盖字段、URL 字段
+- 字段分类：密钥字段（默认只读+脱敏，EDIT_SECRETS=true 后可编辑）、环境变量覆盖字段、URL 字段
 - 原始 YAML 文本的密钥脱敏与还原
 
 安全设计：
-- 密钥类字段（webhook/token/AI key/S3 等）不允许通过网页修改，
+- 密钥类字段（webhook/token/AI key/S3 等）默认不允许通过网页修改：
   GET 时以掩码占位符返回，PUT 时仅接受"保持原值"
-- 环境变量覆盖的字段：修改会被忽略并返回提示（Docker 下 env 优先于 config.yaml）
+- 设置环境变量 EDIT_SECRETS=true 后开放密钥编辑（写入 config.yaml），
+  适用于仅在 127.0.0.1/SSH 隧道等受控网络访问设置中心的部署
+- 无论是否开放编辑，环境变量覆盖的字段修改都会被忽略并返回提示
+  （Docker 下 env 优先于 config.yaml）
 """
 
 import copy
@@ -155,6 +158,11 @@ def get_env_shadowed() -> Dict[str, str]:
         if os.environ.get(env_name, "").strip():
             result[path] = env_name
     return result
+
+
+def secrets_editable() -> bool:
+    """密钥字段是否允许通过网页编辑（由 EDIT_SECRETS 环境变量控制）"""
+    return os.environ.get("EDIT_SECRETS", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 # ═══════════════════════════════════════════════════════
@@ -318,21 +326,29 @@ def load_config_ruamel() -> CommentedMap:
 
 def get_structured_config() -> Dict[str, Any]:
     """
-    获取结构化配置（YAML 原始形状），密钥字段已脱敏
+    获取结构化配置（YAML 原始形状）
+
+    默认对密钥字段脱敏；EDIT_SECRETS=true 时返回真实值且不设只读限制。
 
     返回:
         {
-            "data": {...YAML 内容, 密钥字段为掩码...},
+            "data": {...YAML 内容...},
             "env_shadowed": {路径: 环境变量名},
-            "readonly_fields": [密钥字段路径],
+            "readonly_fields": [密钥字段路径]（开放编辑时为空）,
+            "secrets_editable": bool,
         }
     """
     data = _to_plain(copy.deepcopy(load_config_ruamel()))
-    data = _mask_credentials(data)
+    editable = secrets_editable()
+    readonly: List[str] = []
+    if not editable:
+        data = _mask_credentials(data)
+        readonly = list(CREDENTIAL_FIELDS)
     return {
         "data": data,
         "env_shadowed": get_env_shadowed(),
-        "readonly_fields": CREDENTIAL_FIELDS,
+        "readonly_fields": readonly,
+        "secrets_editable": editable,
     }
 
 
@@ -399,19 +415,28 @@ def save_structured_config(
         return False, [f"读取当前配置失败: {e}"], [], []
 
     plain_current = _to_plain(copy.deepcopy(current))
+    editable = secrets_editable()
 
-    # 1. 掩码还原：MASK_TOKEN / 留空 → 当前实际值（密钥字段完全只读）
+    # 1. 掩码还原：提交数据中的 MASK_TOKEN 一律还原为当前实际值
+    #    （默认模式下密钥只读；EDIT_SECRETS 模式下防止旧页面残留掩码被写入）
     for path in CREDENTIAL_FIELDS:
         value = _get_by_path(new_data, path)
-        if isinstance(value, str) and (MASK_TOKEN in value or not value.strip()):
+        if isinstance(value, str) and MASK_TOKEN in value:
             _set_by_path(new_data, path, _get_by_path(plain_current, path))
 
-    # 2. 密钥字段防护：不允许改动
-    for path in CREDENTIAL_FIELDS:
-        new_value = _get_by_path(new_data, path)
-        old_value = _get_by_path(plain_current, path)
-        if new_value != old_value:
-            errors.append(f"密钥字段 {path} 不允许通过网页修改，请使用环境变量管理")
+    if not editable:
+        # 2a. 密钥字段防护（默认模式）：留空也还原为原值，任何实际改动都被拒绝
+        for path in CREDENTIAL_FIELDS:
+            new_value = _get_by_path(new_data, path)
+            old_value = _get_by_path(plain_current, path)
+            if isinstance(new_value, str) and not new_value.strip():
+                _set_by_path(new_data, path, old_value)
+                new_value = old_value
+            if new_value != old_value:
+                errors.append(f"密钥字段 {path} 不允许通过网页修改，请使用环境变量管理")
+    else:
+        # 2b. 可编辑模式：留空视为删除该值（与手改 config.yaml 等效），允许修改
+        pass
 
     if errors:
         return False, errors, warnings, changed
@@ -448,8 +473,13 @@ def save_structured_config(
     except Exception as e:
         return False, [f"写入配置失败: {e}"], warnings, changed
 
-    # 7. 审计
-    summary = "; ".join(f"{c['path']}: {c['summary']}" for c in changed[:10])
+    # 7. 审计（密钥字段的值不写入审计日志）
+    def _audit_entry(c: Dict[str, Any]) -> str:
+        if c["path"] in CREDENTIAL_FIELDS:
+            return f"{c['path']}: ***（密钥已更新）"
+        return f"{c['path']}: {c['summary']}"
+
+    summary = "; ".join(_audit_entry(c) for c in changed[:10])
     if len(changed) > 10:
         summary += f" 等 {len(changed)} 处"
     _write_audit(source_ip, config_path.name, action="update", summary=summary or "无变化")
@@ -487,7 +517,12 @@ def _merge_into_commented_tree(target: Any, source: Any) -> None:
 
 
 def _merge_commented_seq(target: CommentedSeq, source: List[Any]) -> None:
-    """合并列表：带 id 的字典列表按 id 原地更新以保留注释，其余整体替换"""
+    """
+    合并列表：带 id 的字典列表按 id 原地增删改以保留注释
+
+    注意：不要重建整个 CommentedSeq（slice 清空后逐个 append 会破坏
+    ruamel 内部的注释索引，导致序列化时条目错位），必须原地操作。
+    """
     if (
         target
         and all(isinstance(item, CommentedMap) for item in target)
@@ -495,21 +530,27 @@ def _merge_commented_seq(target: CommentedSeq, source: List[Any]) -> None:
         and all(isinstance(item, dict) for item in source)
         and all("id" in item for item in source)
     ):
-        existing_by_id = {item.get("id"): item for item in target}
-        new_seq: List[Any] = []
-        seen_ids = set()
+        source_by_id = {item.get("id"): item for item in source}
+
+        # 删除：target 中不在 source 里的项（从后往前，避免索引位移）
+        for idx in range(len(target) - 1, -1, -1):
+            if target[idx].get("id") not in source_by_id:
+                del target[idx]
+
+        # 更新已有项 + 追加新项（保持 target 现有顺序，新项追加到尾部）
         for item in source:
-            item_id = item.get("id")
-            seen_ids.add(item_id)
-            if item_id in existing_by_id:
-                _merge_into_commented_tree(existing_by_id[item_id], item)
-                new_seq.append(existing_by_id[item_id])
+            matched = next(
+                (existing for existing in target if existing.get("id") == item.get("id")),
+                None,
+            )
+            if matched is not None:
+                _merge_into_commented_tree(matched, item)
             else:
-                new_seq.append(item)
-        # 按 source 的顺序重建
-        target[:] = []
-        for item in new_seq:
-            target.append(item)
+                target.append(item)
+        return
+
+    # 无 id 的列表：内容完全一致时跳过重写，避免丢失列表项的行内注释
+    if len(target) == len(source) and all(target[i] == source[i] for i in range(len(source))):
         return
 
     target[:] = source
@@ -521,8 +562,10 @@ def _merge_commented_seq(target: CommentedSeq, source: List[Any]) -> None:
 
 
 def get_config_raw() -> str:
-    """获取 config.yaml 原文，密钥字段值已替换为掩码"""
+    """获取 config.yaml 原文；默认模式下密钥字段值替换为掩码，EDIT_SECRETS 模式返回原文"""
     text = read_text_file(Path(get_config_path()))
+    if secrets_editable():
+        return text
     try:
         data = yaml.safe_load(text) or {}
         for path in CREDENTIAL_FIELDS:
@@ -566,18 +609,19 @@ def save_config_raw(text: str, source_ip: str = "") -> Tuple[bool, List[str], Li
     if not isinstance(new_data, dict):
         return False, ["config.yaml 顶层结构必须是键值映射"], []
 
-    # 3. 密钥字段防护（掩码/留空还原为原值，任何实际改动都被拒绝）
-    for path in CREDENTIAL_FIELDS:
-        new_value = _get_by_path(new_data, path)
-        old_value = _get_by_path(current_data, path)
-        if isinstance(new_value, str) and (MASK_TOKEN in new_value or not new_value.strip()):
-            _set_by_path(new_data, path, old_value)
-            new_value = old_value
-        if new_value != old_value:
-            errors.append(f"密钥字段 {path} 不允许通过网页修改，请使用环境变量管理")
+    # 3. 密钥字段防护（仅默认模式；EDIT_SECRETS 模式允许修改，但掩码仍还原为原值）
+    if not secrets_editable():
+        for path in CREDENTIAL_FIELDS:
+            new_value = _get_by_path(new_data, path)
+            old_value = _get_by_path(current_data, path)
+            if isinstance(new_value, str) and (MASK_TOKEN in new_value or not new_value.strip()):
+                _set_by_path(new_data, path, old_value)
+                new_value = old_value
+            if new_value != old_value:
+                errors.append(f"密钥字段 {path} 不允许通过网页修改，请使用环境变量管理")
 
-    if errors:
-        return False, errors, warnings
+        if errors:
+            return False, errors, warnings
 
     # 4. 结构校验
     errors, validate_warnings = validate_config_data(new_data)

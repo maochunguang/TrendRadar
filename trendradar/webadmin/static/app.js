@@ -10,11 +10,14 @@ const state = {
   data: null,        // 当前编辑中的结构化配置（YAML 形状）
   loaded: null,      // 载入时的快照（用于 diff）
   envShadowed: {},   // 路径 → 环境变量名
-  readonly: [],      // 密钥字段路径
+  readonly: [],      // 密钥字段路径（EDIT_SECRETS 未开启时）
+  secretsEditable: false,
   textFiles: [],     // 白名单文本文件
   activeFile: null,
   activeFileText: "",
   activeLog: null,
+  freqModel: { header: "", global_filters: [], filters: [], groups: [] },
+  freqMode: "structured",
   pollTimer: null,
 };
 
@@ -138,9 +141,17 @@ function renderField(f) {
     const text = Array.isArray(value) ? value.join(", ") : (value ?? "");
     control = `<input type="text" data-path="${f.path}" data-csv="1" value="${escapeHtml(text)}" ${gate.disabled ? "disabled" : ""} placeholder="多个用英文逗号分隔，留空表示无">`;
   } else if (f.type === "credential") {
-    const configured = (value && value !== "") || state.envShadowed[f.path];
-    control = `<input type="password" data-path="${f.path}" value="${escapeHtml(value ?? "")}" disabled
-      title="${escapeHtml(gate.reason || "")}" placeholder="${configured ? "已配置（脱敏显示）" : "未配置，请在 docker/.env 中设置"}">`;
+    if (state.secretsEditable) {
+      // 可编辑模式：密码框 + 显示切换
+      control = `<div class="cred-row">
+        <input type="password" data-path="${f.path}" value="${escapeHtml(value ?? "")}" placeholder="">
+        <button type="button" class="btn small cred-toggle">显示</button>
+      </div>`;
+    } else {
+      const configured = (value && value !== "") || state.envShadowed[f.path];
+      control = `<input type="password" data-path="${f.path}" value="${escapeHtml(value ?? "")}" disabled
+        title="${escapeHtml(gate.reason || "")}" placeholder="${configured ? "已配置（脱敏显示）" : "未配置，请在 docker/.env 中设置"}">`;
+    }
   } else {
     const type = f.type === "number" ? "number" : "text";
     control = `<input type="${type}" data-path="${f.path}" value="${escapeHtml(value ?? "")}" ${gate.disabled ? "disabled" : ""}>`;
@@ -186,6 +197,15 @@ function bindFieldEvents(container) {
       }
     };
     el.addEventListener(el.type === "checkbox" ? "change" : "input", handler);
+  });
+
+  container.querySelectorAll(".cred-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const input = btn.parentElement.querySelector("input");
+      const hidden = input.type === "password";
+      input.type = hidden ? "text" : "password";
+      btn.textContent = hidden ? "隐藏" : "显示";
+    });
   });
 
   const saveBtn = container.querySelector(".btn-save-config");
@@ -294,7 +314,7 @@ const SECTIONS = [
     id: "storage", title: "💾 存储", render: () => renderFields("panel-storage", [
       {
         title: "存储后端",
-        hint: "敏感的 S3 访问密钥请通过环境变量 S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY 管理",
+        hint: "S3 访问密钥可通过环境变量 S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY 管理，开启 EDIT_SECRETS 后也可在此修改",
         fields: [
           {
             path: "storage.backend", label: "存储后端", type: "select", options: [
@@ -399,7 +419,7 @@ function renderSources() {
     </div>
     <div class="card">
       <h2>RSS 订阅</h2>
-      <p class="card-hint">每个源可单独配置 enabled 与 max_age_days（覆盖全局新鲜度过滤）</p>
+      <p class="card-hint">每个源可单独配置 enabled 与 max_age_days（覆盖全局新鲜度过滤）；支持从其他阅读器导入 OPML</p>
       <div id="rssFields"></div>
       <div style="margin-top:10px"><strong>RSS 源列表</strong>
         <div class="list-editor" id="feedList"></div>
@@ -413,11 +433,14 @@ function renderSources() {
     { path: "platforms.enabled", label: "启用热榜抓取", type: "bool" },
     { path: "platforms.api_url", label: "热榜数据 API 地址", hint: "留空使用默认地址；自部署填你的实例地址" },
     { path: "rss.enabled", label: "启用 RSS 抓取", type: "bool" },
+    { path: "rss.summary.enabled", label: "显示文章摘要", type: "bool", hint: "在推送和网页报告中展示 RSS 摘要，看完摘要可不点原文" },
+    { path: "rss.summary.max_length", label: "摘要最大长度（字符）", type: "number", hint: "0=不截断" },
+    { path: "rss.summary.fulltext_fallback", label: "无摘要时抓取原文提取", type: "bool", hint: "有网络开销，每次运行最多 20 篇、超时 10 秒" },
     { path: "rss.freshness_filter.enabled", label: "启用新鲜度过滤", type: "bool" },
     { path: "rss.freshness_filter.max_age_days", label: "最大文章年龄（天）", type: "number", hint: "0 = 推送所有文章" },
   ];
   $("platformFields").innerHTML = renderField(scalars[0]) + renderField(scalars[1]);
-  $("rssFields").innerHTML = renderField(scalars[2]) + renderField(scalars[3]) + renderField(scalars[4]);
+  $("rssFields").innerHTML = scalars.slice(2).map(renderField).join("");
   bindFieldEvents(container);
 
   renderSourceList();
@@ -431,6 +454,18 @@ function renderSources() {
     state.data.rss.feeds.push({ id: "new-feed", name: "新源", url: "https://", enabled: true });
     renderFeedList();
   });
+
+  // OPML 导入按钮（追加到 RSS 卡片标题行）
+  const rssCard = $("feedList").closest(".card");
+  if (rssCard && !rssCard.querySelector(".btn-opml")) {
+    const opmlBtn = document.createElement("button");
+    opmlBtn.className = "btn small btn-opml";
+    opmlBtn.textContent = "📥 导入 OPML";
+    opmlBtn.style.marginLeft = "10px";
+    opmlBtn.addEventListener("click", openOpmlModal);
+    const heading = rssCard.querySelector("strong");
+    if (heading && heading.parentElement) heading.parentElement.insertBefore(opmlBtn, heading.nextSibling);
+  }
 
   container.querySelector(".btn-save-config").addEventListener("click", () => saveConfig());
 }
@@ -512,6 +547,14 @@ function renderDisplay() {
 
   container.innerHTML = `
     <div class="card">
+      <h2>推送长度控制</h2>
+      <div id="capFields"></div>
+    </div>
+    <div class="card">
+      <h2>跨平台同事件聚合</h2>
+      <div id="clusterFields"></div>
+    </div>
+    <div class="card">
       <h2>区域显示顺序与开关</h2>
       <p class="card-hint">从上到下 = 推送中从上到下；勾选才会显示该区域（同时写入 display.regions 开关）。用 ↑↓ 调整顺序。</p>
       <div id="regionList"></div>
@@ -524,6 +567,13 @@ function renderDisplay() {
       <div style="margin-top:8px"><strong>完整展示的 RSS 源</strong> <div id="saFeeds"></div></div>
     </div>
     ${saveBar()}`;
+
+  $("capFields").innerHTML =
+    renderField({ path: "display.max_items_per_message", label: "每条消息最大条目数", type: "number", hint: "推送中所有区域合计的展示上限，超出部分显示提示行；0=不限制。开启摘要后建议 30~50" });
+  $("clusterFields").innerHTML =
+    renderField({ path: "display.event_clustering.enabled", label: "启用同事件聚合", type: "bool", hint: "同一事件在多个平台上榜时合并为一条，标注'同见: 其他平台'" }) +
+    renderField({ path: "display.event_clustering.similarity_threshold", label: "标题相似度阈值", type: "number", hint: "0~1，越大越严格；0.6 适合多数场景" });
+  bindFieldEvents(container);
 
   const renderRegions = () => {
     const list = $("regionList");
@@ -616,6 +666,12 @@ function renderNotification() {
   const container = $("panel-notification");
   CRED_PATHS_SET.clear();
 
+  const credNote = (envName, configured) => {
+    if (envName) return `✅ 由环境变量 ${envName} 生效（修改此项无效）`;
+    if (state.secretsEditable) return configured ? "已写入 config.yaml，保存后下次运行生效" : "未填写，填写并保存即可启用";
+    return configured ? "已写入 config.yaml（建议迁移到 docker/.env 环境变量）" : "未配置";
+  };
+
   const cards = CHANNEL_DEFS.map(ch => {
     const credFields = ch.creds.map(k => {
       const path = `notification.channels.${ch.key}.${k}`;
@@ -624,7 +680,7 @@ function renderNotification() {
       const configured = envName || (getPath(state.data, path) || "").trim();
       return renderField({ path, label: k, type: "credential" }) +
         `<div style="font-size:11.5px;color:var(--text-muted);margin:-2px 0 6px 232px">
-          ${envName ? `✅ 由环境变量 ${envName} 生效` : configured ? "已写入 config.yaml（建议迁移到 docker/.env 环境变量）" : "未配置"}
+          ${credNote(envName, configured)}
         </div>`;
     }).join("");
     const extraFields = (ch.extra || []).map(renderField).join("");
@@ -634,11 +690,14 @@ function renderNotification() {
     </div>`;
   }).join("");
 
+  const tip = state.secretsEditable
+    ? `🔓 凭据编辑已开启（EDIT_SECRETS=true）：下方凭据可直接修改并保存到 config.yaml，点「立即运行」生效。
+       带 <span class="badge env">env</span> 徽标的字段仍以环境变量为准（需清空 docker/.env 中对应变量后才能改为页面管理）。`
+    : `🔒 安全设计：各渠道凭据（webhook/token/密码）通过 <strong>docker/.env 环境变量</strong>管理，页面仅脱敏展示、不可修改。
+       如需在页面直接编辑凭据，请在 docker/.env 中设置 <code>EDIT_SECRETS=true</code> 后重启容器。多账号用英文分号(;)分隔。`;
+
   container.innerHTML = `
-    <div class="welcome-tip">
-      🔒 安全设计：各渠道凭据（webhook/token/密码）通过 <strong>docker/.env 环境变量</strong>管理，页面仅脱敏展示、不可修改。
-      修改凭据请编辑 docker/.env 后 <code>docker restart trendradar</code>。多账号用英文分号(;)分隔。
-    </div>
+    <div class="welcome-tip">${tip}</div>
     <div class="card">
       <h2>通知总开关</h2>
       <div id="notifEnabled"></div>
@@ -669,7 +728,7 @@ function renderAI() {
   renderFields("panel-ai", [
     {
       title: "AI 模型（ai_analysis / ai_translation / ai_filter 共用）",
-      hint: "LiteLLM 格式，如 deepseek/deepseek-v4-flash、openai/gpt-4o、gemini/gemini-2.5-flash；API Key 请通过环境变量 AI_API_KEY 管理",
+      hint: "LiteLLM 格式，如 deepseek/deepseek-v4-flash、openai/gpt-4o、gemini/gemini-2.5-flash；API Key 可通过环境变量 AI_API_KEY 管理，开启 EDIT_SECRETS 后也可在此修改",
       fields: [
         { path: "ai.model", label: "模型" },
         { path: "ai.api_key", label: "API Key", type: "credential" },
@@ -679,6 +738,17 @@ function renderAI() {
         { path: "ai.max_tokens", label: "最大生成 token 数", type: "number", hint: "API 报 HTTP 400 时设为 0 禁用" },
         { path: "ai.num_retries", label: "失败重试次数", type: "number" },
         { path: "ai.fallback_models", label: "备用模型", type: "csvlist" },
+      ],
+    },
+    {
+      title: "热榜条目 AI 摘要",
+      hint: "为进入推送的热榜条目生成一句话摘要（🤖 行），让推送\"看完就懂\"；消耗少量 token",
+      fields: [
+        { path: "ai_summary.enabled", label: "启用条目摘要", type: "bool" },
+        { path: "ai_summary.max_items", label: "每次运行最多条数", type: "number", hint: "按显示顺序取前 N 条，上限 100" },
+        { path: "ai_summary.max_chars", label: "单条摘要最大长度", type: "number" },
+        { path: "ai_summary.batch_size", label: "每批标题数", type: "number" },
+        { path: "ai_summary.batch_interval", label: "分批间隔（秒）", type: "number" },
       ],
     },
     {
@@ -714,6 +784,195 @@ function renderAI() {
   ]);
 }
 
+/* ══════════════ 词组结构化编辑器 ══════════════ */
+
+function parseEntryInput(input, forceKind) {
+  // 输入解析：/pattern/flags 或 pattern => display 或普通词
+  const raw = input.trim();
+  if (!raw) return null;
+  const arrowIdx = raw.indexOf("=>");
+  let text = raw;
+  let display = "";
+  if (arrowIdx > 0) {
+    text = raw.slice(0, arrowIdx).trim();
+    display = raw.slice(arrowIdx + 2).trim();
+  }
+  const regexMatch = text.match(/^\/(.+)\/([a-z]*)$/);
+  if (regexMatch && forceKind !== "word") {
+    return { kind: "regex", text: regexMatch[1], flags: regexMatch[2] || "", display };
+  }
+  if (forceKind === "regex" && !regexMatch) {
+    return { kind: "regex", text, flags: "", display };
+  }
+  return { kind: "word", text, display };
+}
+
+function entryLabel(entry) {
+  let text = entry.kind === "regex" ? `/${entry.text}/${entry.flags || ""}` : entry.text;
+  if (entry.display) text += ` => ${entry.display}`;
+  return text;
+}
+
+function renderChips(containerId, list, chipClass, namePrefix) {
+  // namePrefix: "gfilters" | "filters" | "gnormal:组下标" | "grequired:组下标"
+  const wrap = $(containerId);
+  wrap.innerHTML = (list || []).map((entry, i) => `
+    <span class="chip ${chipClass}">${escapeHtml(entryLabel(entry))}
+      <button data-remove="${namePrefix}:${i}" title="删除">×</button>
+    </span>`).join("") || `<span style="color:var(--text-muted);font-size:12px">（无）</span>`;
+
+  wrap.querySelectorAll("button[data-remove]").forEach(btn => {
+    btn.addEventListener("click", () => chipRemoveHandler(btn.dataset.remove));
+  });
+}
+
+function renderFreqEditor() {
+  const model = state.freqModel;
+  const container = $("freqStructured");
+
+  const groupHtml = (model.groups || []).map((g, gi) => `
+    <div class="freq-group" data-gi="${gi}">
+      <div class="freq-group-header">
+        <span class="freq-group-label">组别名</span>
+        <input type="text" data-galias="${gi}" value="${escapeHtml(g.alias || "")}" placeholder="可选，如：华为">
+        <span class="freq-group-label">条数上限</span>
+        <input type="number" data-gmax="${gi}" value="${g.max_count || 0}" style="max-width:90px" title="0=不限制">
+        <button class="btn small danger" data-gdel="${gi}">删除词组</button>
+      </div>
+      <div class="freq-section-title">普通词（命中任意一个即匹配）</div>
+      <div class="chip-list" id="gnormal-${gi}"></div>
+      <div class="chip-add">
+        <input type="text" data-gadd="${gi}" placeholder="输入关键词或 /正则/ 或 词 => 别名，回车添加">
+      </div>
+      <div class="freq-section-title">必须词（全部命中才匹配，可空）</div>
+      <div class="chip-list" id="grequired-${gi}"></div>
+    </div>`).join("");
+
+  container.innerHTML = `
+    <div class="freq-section-title">全局过滤词（[GLOBAL_FILTER] 区，包含即排除）</div>
+    <div class="chip-list" id="gfilterList"></div>
+    <div class="chip-add"><input type="text" id="addGFilter" placeholder="输入要排除的词或 /正则/，回车添加"></div>
+
+    <div class="freq-section-title">过滤词（! 开头，全局生效，主程序实现如此）</div>
+    <div class="chip-list" id="filterList"></div>
+    <div class="chip-add"><input type="text" id="addFilter" placeholder="输入要过滤的词或 /正则/，回车添加"></div>
+
+    <div class="freq-section-title" style="display:flex;align-items:center;gap:10px">
+      词组（${(model.groups || []).length} 组）
+      <button class="btn small" id="btnAddGroup">＋ 新增词组</button>
+    </div>
+    ${groupHtml}
+    <div class="btn-row">
+      <button class="btn primary" id="btnSaveFreq">💾 保存关键词</button>
+      <span style="color:var(--text-muted);font-size:12.5px">保存前自动校验并备份；改动在下次运行时生效</span>
+    </div>`;
+
+  renderChips("gfilterList", model.global_filters, "", "gfilters");
+  renderChips("filterList", model.filters, "chip-filter", "filters");
+
+  (model.groups || []).forEach((g, gi) => {
+    renderChips(`gnormal-${gi}`, g.normal, "", `gnormal:${gi}`);
+    renderChips(`grequired-${gi}`, g.required, "chip-required", `grequired:${gi}`);
+  });
+
+  // 事件：组别名/条数
+  container.querySelectorAll("input[data-galias]").forEach(inp => {
+    inp.addEventListener("input", () => { model.groups[+inp.dataset.galias].alias = inp.value; });
+  });
+  container.querySelectorAll("input[data-gmax]").forEach(inp => {
+    inp.addEventListener("change", () => {
+      const num = parseInt(inp.value, 10) || 0;
+      model.groups[+inp.dataset.gmax].max_count = num;
+    });
+  });
+  container.querySelectorAll("button[data-gdel]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      model.groups.splice(+btn.dataset.gdel, 1);
+      renderFreqEditor();
+    });
+  });
+  // 事件：词条输入框回车添加
+  container.querySelectorAll("input[data-gadd]").forEach(inp => {
+    inp.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      const gi = +inp.dataset.gadd;
+      const entry = parseEntryInput(inp.value);
+      if (!entry) return;
+      model.groups[gi].normal.push(entry);
+      inp.value = "";
+      renderFreqEditor();
+    });
+  });
+  const addGFilter = $("addGFilter");
+  addGFilter.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const entry = parseEntryInput(addGFilter.value);
+    if (!entry) return;
+    model.global_filters.push(entry);
+    addGFilter.value = "";
+    renderFreqEditor();
+  });
+  const addFilter = $("addFilter");
+  addFilter.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const entry = parseEntryInput(addFilter.value);
+    if (!entry) return;
+    model.filters.push(entry);
+    addFilter.value = "";
+    renderFreqEditor();
+  });
+  $("btnAddGroup").addEventListener("click", () => {
+    model.groups.push({ alias: "", required: [], normal: [], max_count: 0 });
+    renderFreqEditor();
+  });
+  $("btnSaveFreq").addEventListener("click", saveFreqStructured);
+}
+
+function chipRemoveHandler(name, idx) {
+  // 形如 "gnormal:2:3" → 列表定位
+  const parts = name.split(":");
+  if (parts[0] === "gfilters") { state.freqModel.global_filters.splice(+parts[1], 1); }
+  else if (parts[0] === "filters") { state.freqModel.filters.splice(+parts[1], 1); }
+  else if (parts[0] === "gnormal") { state.freqModel.groups[+parts[1]].normal.splice(+parts[2], 1); }
+  else if (parts[0] === "grequired") { state.freqModel.groups[+parts[1]].required.splice(+parts[2], 1); }
+  renderFreqEditor();
+}
+
+async function loadFreqStructured() {
+  try {
+    state.freqModel = await api("/api/frequency");
+  } catch (e) {
+    toast("词组解析失败：" + e.message, "error");
+    state.freqModel = { header: "", global_filters: [], filters: [], groups: [] };
+  }
+}
+
+async function saveFreqStructured() {
+  try {
+    const result = await api("/api/frequency", { method: "PUT", body: JSON.stringify({ model: state.freqModel }) });
+    toast(result.message || "关键词已保存", "success");
+    $("textEditorStatus").textContent = `已保存（${result.groups} 个词组）${result.backup ? "，已备份" : ""}`;
+    // 刷新原始文本缓存
+    const data = await api("/api/file/frequency_words.txt");
+    state.activeFileText = data.text;
+    $("textEditor").value = data.text;
+  } catch (e) {
+    const detail = (e.data && e.data.errors) ? e.data.errors : [e.message];
+    detail.forEach(d => toast(d, "error"));
+  }
+}
+
+function setFreqMode(mode) {
+  state.freqMode = mode;
+  const isStructured = mode === "structured";
+  $("freqStructured").style.display = isStructured ? "block" : "none";
+  $("textEditor").style.display = isStructured ? "none" : "block";
+  $("btnSaveText").style.display = isStructured ? "none" : "inline-block";
+  $("btnFreqStructured").classList.toggle("active", isStructured);
+  $("btnFreqRaw").classList.toggle("active", !isStructured);
+  if (isStructured) renderFreqEditor();
+}
+
 /* ══════════════ 文本文件编辑 ══════════════ */
 
 async function renderTextEditor() {
@@ -742,6 +1001,17 @@ async function loadTextFile(name) {
     $("fileTabs").querySelectorAll("button").forEach(b =>
       b.classList.toggle("active", b.dataset.file === name));
     $("freqSyntaxHelp").style.display = name === "frequency_words.txt" ? "block" : "none";
+
+    // 关键词文件：提供结构化/原始双模式
+    const isFreq = name === "frequency_words.txt";
+    $("freqModeToggle").style.display = isFreq ? "block" : "none";
+    if (isFreq) {
+      await loadFreqStructured();
+      setFreqMode("structured");
+    } else {
+      setFreqMode("raw");
+      $("freqStructured").style.display = "none";
+    }
   } catch (e) {
     toast(e.message, "error");
   }
@@ -766,6 +1036,9 @@ async function saveTextFile() {
 /* ══════════════ 原始 YAML 编辑 ══════════════ */
 
 async function renderRawEditor() {
+  $("rawEditorHint").innerHTML = state.secretsEditable
+    ? '兜底编辑器，可修改所有配置项（含凭据，当前 EDIT_SECRETS 已开启）。保存前进行语法与结构校验。'
+    : '兜底编辑器，可修改所有配置项（密钥字段已脱敏，无法通过此处修改；开启 EDIT_SECRETS 后可编辑）。保存前进行语法与结构校验。';
   try {
     const data = await api("/api/config/raw");
     $("rawEditor").value = data.text;
@@ -851,7 +1124,7 @@ function renderOverview() {
   refreshOverviewLog();
 
   if (!s.admin_auth_enabled) {
-    document.querySelectorAll(".btn-save-config, #btnSaveText, #btnSaveRaw").forEach(b => b.disabled = true);
+    document.querySelectorAll(".btn-save-config, #btnSaveText, #btnSaveRaw, #btnSaveFreq").forEach(b => b.disabled = true);
   }
 }
 
@@ -995,6 +1268,7 @@ async function loadStructuredConfig() {
   state.loaded = deepClone(data.data);
   state.envShadowed = data.env_shadowed || {};
   state.readonly = data.readonly_fields || [];
+  state.secretsEditable = !!data.secrets_editable;
 }
 
 async function boot(rerender = true) {
@@ -1011,6 +1285,41 @@ async function boot(rerender = true) {
   }
 }
 
+/* ══════════════ OPML 导入 ══════════════ */
+
+function openOpmlModal() {
+  $("opmlMask").classList.add("show");
+}
+
+async function importOpml() {
+  const content = $("opmlContent").value.trim();
+  if (!content) { toast("请先粘贴 OPML 内容或选择文件", "warn"); return; }
+  try {
+    const result = await api("/api/rss/opml", { method: "POST", body: JSON.stringify({ content }) });
+    toast(result.message || "导入完成", result.added > 0 ? "success" : "warn");
+    if (result.warnings && result.warnings.length) toast(result.warnings.join("；"), "warn");
+    $("opmlMask").classList.remove("show");
+    $("opmlContent").value = "";
+    // 重新加载配置并刷新数据源页
+    await loadStructuredConfig();
+    switchSection("sources");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+function bindOpmlEvents() {
+  $("btnOpmlImport").addEventListener("click", importOpml);
+  $("btnOpmlCancel").addEventListener("click", () => $("opmlMask").classList.remove("show"));
+  $("opmlFile").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { $("opmlContent").value = reader.result; };
+    reader.readAsText(file);
+  });
+}
+
 /* 事件绑定 */
 $("btnRunNow").addEventListener("click", runNow);
 $("btnTestNotify").addEventListener("click", testNotification);
@@ -1020,5 +1329,9 @@ $("btnSaveText").addEventListener("click", saveTextFile);
 $("btnSaveRaw").addEventListener("click", saveRawEditor);
 $("btnConfirmSave").addEventListener("click", confirmSave);
 $("btnCancelSave").addEventListener("click", () => $("confirmMask").classList.remove("show"));
+$("btnFreqStructured").addEventListener("click", () => setFreqMode("structured"));
+$("btnFreqRaw").addEventListener("click", () => setFreqMode("raw"));
+// 结构化模式的保存按钮在 renderFreqEditor 中动态绑定
+bindOpmlEvents();
 
 boot();

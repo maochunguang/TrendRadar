@@ -71,9 +71,9 @@ header .version { font-size: 12px; color: var(--text-muted); font-weight: normal
 .layout { display: flex; flex: 1; min-height: 0; }
 
 nav {
-  width: 200px;
+  width: 250px;
   background: var(--sidebar-bg);
-  padding: 12px 8px;
+  padding: 12px 10px;
   flex-shrink: 0;
   overflow-y: auto;
 }
@@ -82,7 +82,7 @@ nav button {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 9px 14px;
+  padding: 9px 16px;
   margin: 2px 0;
   border: none;
   background: transparent;
@@ -97,9 +97,8 @@ nav button.active { background: var(--primary); color: #fff; }
 
 main {
   flex: 1;
-  padding: 20px 28px 60px;
+  padding: 24px 48px 60px;
   overflow-y: auto;
-  max-width: 980px;
 }
 
 section.panel { display: none; }
@@ -111,7 +110,7 @@ section.panel.active { display: block; }
   background: var(--card-bg);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 18px 22px;
+  padding: 20px 28px;
   margin-bottom: 18px;
 }
 
@@ -263,6 +262,11 @@ textarea.code {
 }
 .region-item .region-name { flex: 1; }
 
+/* 凭据可编辑模式的输入行 */
+.cred-row { display: flex; gap: 8px; }
+.cred-row input { flex: 1; min-width: 0; }
+.cred-row .cred-toggle { flex-shrink: 0; align-self: stretch; }
+
 /* 渠道卡片 */
 .channel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .channel-card {
@@ -320,6 +324,47 @@ details.syntax-help pre { margin: 8px 0 0; font-size: 12px; line-height: 1.7; }
   font-size: 12.5px;
 }
 .file-tabs button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+/* 词组结构化编辑器 */
+.chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  background: #f1f5f9;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  font-size: 12.5px;
+}
+.chip.chip-required { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.chip.chip-filter { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+.chip.chip-regex { background: #f5f3ff; border-color: #ddd6fe; color: #6d28d9; }
+.chip button {
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.chip button:hover { color: var(--danger); }
+
+.chip-add { display: flex; gap: 6px; margin: 6px 0; }
+.chip-add input { flex: 1; max-width: 320px; }
+.chip-add select { width: auto; flex-shrink: 0; }
+
+.freq-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.freq-group-header { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.freq-group-header input { max-width: 240px; }
+.freq-group-label { font-size: 12px; color: var(--text-muted); width: 70px; flex-shrink: 0; }
+.freq-section-title { font-weight: 600; font-size: 13px; margin: 12px 0 4px; }
 
 /* ══════════ 弹层 ══════════ */
 

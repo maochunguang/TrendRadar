@@ -502,6 +502,7 @@ def count_rss_frequency(
     timezone: str = DEFAULT_TIMEZONE,
     rank_threshold: int = 5,
     quiet: bool = False,
+    summary_config: Optional[Dict] = None,
 ) -> Tuple[List[Dict], int]:
     """
     按关键词分组统计 RSS 条目（与热榜统计格式一致）
@@ -513,6 +514,7 @@ def count_rss_frequency(
             - feed_name: RSS 源名称
             - url: 文章链接
             - published_at: 发布时间（ISO 格式）
+            - summary: 摘要（可选，summary_config 启用时进入展示）
         word_groups: 词组配置列表
         filter_words: 过滤词列表
         global_filters: 全局过滤词（可选）
@@ -521,6 +523,7 @@ def count_rss_frequency(
         sort_by_position_first: 是否优先按配置位置排序
         timezone: 时区名称（用于时间格式化）
         quiet: 是否静默模式
+        summary_config: 摘要展示配置 {"ENABLED": bool, "MAX_LENGTH": int}，None 表示不展示摘要
 
     Returns:
         Tuple[List[Dict], int]: (统计结果列表, 总条目数)
@@ -540,7 +543,8 @@ def count_rss_frequency(
                         "rank_threshold": 50,
                         "url": "...",
                         "mobile_url": "",
-                        "is_new": True/False
+                        "is_new": True/False,
+                        "summary": "摘要"  # 仅 summary_config 启用时存在
                     }
                 ],
                 "percentage": 10.0
@@ -548,6 +552,10 @@ def count_rss_frequency(
         ]
     """
     from trendradar.utils.time import format_iso_time_friendly
+    from trendradar.utils.text import clean_summary_text
+
+    summary_enabled = bool(summary_config and summary_config.get("ENABLED"))
+    summary_max_length = int(summary_config.get("MAX_LENGTH", 100)) if summary_config else 100
 
     if not rss_items:
         return [], 0
@@ -653,6 +661,10 @@ def count_rss_frequency(
                     "mobile_url": "",
                     "is_new": is_new,
                 }
+                if summary_enabled:
+                    title_data["summary"] = clean_summary_text(
+                        item.get("summary", ""), summary_max_length
+                    )
                 word_stats[group_key]["titles"].append(title_data)
                 break  # 一个条目只匹配第一个词组
 

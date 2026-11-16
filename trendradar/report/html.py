@@ -729,6 +729,25 @@ def render_html_content(
                 margin-bottom: 6px;
             }
 
+            .rss-summary {
+                color: #6b7280;
+                font-size: 13px;
+                line-height: 1.6;
+                margin-top: 4px;
+            }
+
+            .item-summary {
+                color: #6b7280;
+                font-size: 13px;
+                line-height: 1.6;
+                margin-top: 2px;
+            }
+
+            .also-in {
+                color: #94a3b8;
+                font-size: 12px;
+            }
+
             .rss-link {
                 color: #1f2937;
                 text-decoration: none;
@@ -1286,6 +1305,10 @@ def render_html_content(
             body.dark-mode .rss-item {
                 background: #1a2e25;
                 border-left-color: #059669;
+            }
+            body.dark-mode .rss-summary,
+            body.dark-mode .item-summary {
+                color: #94a3b8;
             }
 
             /* AI 分析区 */
@@ -1865,7 +1888,15 @@ def render_html_content(
                     rss_html += escaped_title
 
                 rss_html += """
-                            </div>
+                            </div>"""
+
+                # 摘要（rss.summary.enabled 时由统计层附带）
+                item_summary = title_data.get("summary", "")
+                if item_summary:
+                    rss_html += f"""
+                            <div class="rss-summary">{html_escape(f"💬 {item_summary}")}</div>"""
+
+                rss_html += """
                         </div>"""
 
             rss_html += """

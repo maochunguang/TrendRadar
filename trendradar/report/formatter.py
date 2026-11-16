@@ -10,7 +10,66 @@ from typing import Dict
 from trendradar.report.helpers import clean_title, html_escape, format_rank_display
 
 
+def _format_summary_text(summary_text: str, platform: str, icon: str = "💬") -> str:
+    """为标题行生成摘要行（各平台格式适配）
+
+    Args:
+        summary_text: 已清洗的摘要纯文本
+        platform: 目标平台（feishu/dingtalk/wework/bark/telegram/ntfy/slack/html 等）
+        icon: 行首图标（RSS 摘要用 💬，AI 摘要用 🤖）
+
+    Returns:
+        以换行开头的摘要行（HTML 平台返回 div 片段）
+    """
+    if not summary_text:
+        return ""
+
+    if platform == "html":
+        return f"<div class='item-summary'>{html_escape(f'{icon} {summary_text}')}</div>"
+    if platform == "telegram":
+        return f"\n     {icon} {html_escape(summary_text)}"
+    if platform == "slack":
+        return f"\n     {icon} {summary_text}"
+    if platform == "feishu":
+        return f"\n     <font color='grey'>{icon} {summary_text}</font>"
+    # dingtalk / wework / bark / ntfy 及其他 markdown 兼容格式
+    return f"\n     {icon} {summary_text}"
+
+
+def _format_also_in(title_data: Dict, platform: str) -> str:
+    """生成同事件多平台提示（追加到标题行末尾，不换行）"""
+    also_in = title_data.get("also_in") or []
+    if not also_in:
+        return ""
+    text = "同见: " + "、".join(also_in)
+    if platform == "html":
+        return f" <span class='also-in'>{html_escape(f'({text})')}</span>"
+    if platform == "feishu":
+        return f" <font color='grey'>({text})</font>"
+    return f" ({text})"
+
+
 def format_title_for_platform(
+    platform: str, title_data: Dict, show_source: bool = True, show_keyword: bool = False
+) -> str:
+    """统一的标题格式化入口：格式化标题行并按需追加摘要行
+
+    - title_data["summary"]: RSS 摘要（rss.summary.enabled 时由统计层附带）
+    - title_data["ai_summary"]: AI 生成的一句话摘要（ai_summary.enabled 时附带）
+    - title_data["also_in"]: 同事件其他平台列表（event_clustering.enabled 时附带）
+    """
+    result = _format_title_line(platform, title_data, show_source, show_keyword)
+    result += _format_also_in(title_data, platform)
+    summary_text = title_data.get("summary", "")
+    if summary_text:
+        result += _format_summary_text(summary_text, platform, icon="💬")
+    ai_summary_text = title_data.get("ai_summary", "")
+    if ai_summary_text:
+        result += _format_summary_text(ai_summary_text, platform, icon="🤖")
+    return result
+
+
+def _format_title_line(
     platform: str, title_data: Dict, show_source: bool = True, show_keyword: bool = False
 ) -> str:
     """统一的标题格式化方法

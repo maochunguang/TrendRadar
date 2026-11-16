@@ -16,10 +16,16 @@ from trendradar.context import AppContext
 from trendradar import __version__
 from trendradar.core import load_config
 from trendradar.core.analyzer import convert_keyword_stats_to_platform_stats
+from trendradar.core.clustering import apply_clustering_to_stats
 from trendradar.crawler import DataFetcher
 from trendradar.storage import convert_crawl_results_to_news_data
+from trendradar.notification import (
+    apply_item_cap_to_groups,
+)
 from trendradar.utils.time import DEFAULT_TIMEZONE, is_within_days, calculate_days_old
-from trendradar.ai import AIAnalyzer, AIAnalysisResult
+from trendradar.utils.text import clean_summary_text
+from trendradar.ai import AIAnalyzer, AIAnalysisResult, create_item_summarizer
+from trendradar.crawler.fulltext import FulltextFetcher, MAX_PER_RUN as MAX_FULLTEXT_PER_RUN, DEFAULT_TIMEOUT as DEFAULT_FULLTEXT_TIMEOUT
 from trendradar.core.scheduler import ResolvedSchedule
 from trendradar.commands import check_all_versions, run_doctor, run_test_notification, handle_status_commands
 from trendradar.commands.version import _fetch_remote_version, _parse_version
@@ -82,6 +88,8 @@ class NewsAnalyzer:
 
         # RSS/平台元数据（用于报告头部展示）
         self._rss_source_total = 0
+        # RSS 全文提取兜底抓取器（懒加载，同一运行内共享缓存与上限）
+        self._fulltext_fetcher = None
         self._rss_source_failed = 0
         self._rss_total_count = 0
         self._rss_matched_count = 0
@@ -612,11 +620,21 @@ class NewsAnalyzer:
 
         # 提取 RSS 数据
         if rss_items and rss_feed_ids:
+            # 摘要配置：独立展示区与统计区共用 rss.summary
+            summary_config = self.ctx.config.get("RSS", {}).get("SUMMARY", {})
+            summary_enabled = bool(summary_config.get("ENABLED"))
+            summary_max_length = int(summary_config.get("MAX_LENGTH", 100) or 100)
+
             # 按 feed_id 分组
             feed_items_map = {}
             for item in rss_items:
                 feed_id = item.get("feed_id", "")
                 if feed_id in rss_feed_ids:
+                    feed_summary = ""
+                    if summary_enabled:
+                        feed_summary = clean_summary_text(
+                            item.get("summary", ""), summary_max_length
+                        )
                     if feed_id not in feed_items_map:
                         feed_items_map[feed_id] = {
                             "name": item.get("feed_name", feed_id),
@@ -627,6 +645,7 @@ class NewsAnalyzer:
                         "url": item.get("url", ""),
                         "published_at": item.get("published_at", ""),
                         "author": item.get("author", ""),
+                        "summary": feed_summary,
                     })
 
             # 限制条数并添加到结果
@@ -707,6 +726,18 @@ class NewsAnalyzer:
 
         self._hotlist_total_count = total_titles
 
+        # 跨平台同事件聚合（可选：同一事件多平台合并为一条，减少重复）
+        clustering_config = self.ctx.config.get("DISPLAY", {}).get("EVENT_CLUSTERING", {})
+        if clustering_config.get("ENABLED") and stats:
+            try:
+                merged_count = apply_clustering_to_stats(
+                    stats, clustering_config.get("SIMILARITY_THRESHOLD", 0.6)
+                )
+                if merged_count:
+                    print(f"[聚合] 已合并 {merged_count} 条跨平台同事件条目")
+            except Exception as e:
+                print(f"[聚合] 聚类异常，已跳过: {e}")
+
         # 如果是 platform 模式，转换数据结构
         if self.ctx.display_mode == "platform" and stats:
             stats = convert_keyword_stats_to_platform_stats(
@@ -714,6 +745,14 @@ class NewsAnalyzer:
                 self.ctx.weight_config,
                 self.ctx.rank_threshold,
             )
+
+        # 热榜条目 AI 一句话摘要（可选；供推送与网页报告展示，失败不影响主流程）
+        try:
+            item_summarizer = create_item_summarizer(self.ctx.config)
+            if item_summarizer and stats:
+                item_summarizer.attach_to_stats(stats)
+        except Exception as e:
+            print(f"[AI摘要] 生成异常，已跳过: {e}")
 
         # AI 分析（如果启用，用于 HTML 报告）
         ai_result = None
@@ -866,6 +905,17 @@ class NewsAnalyzer:
             report_data["rss_total_count"] = self._rss_total_count
             report_data["rss_source_total"] = self._rss_source_total
             report_data["rss_source_failed"] = self._rss_source_failed
+
+            # 每条推送消息最大条目数（display.max_items_per_message，0=不限制）
+            # 仅作用于推送内容；网页报告不受影响
+            item_cap = cfg.get("DISPLAY", {}).get("MAX_ITEMS_PER_MESSAGE", 0)
+            if item_cap > 0:
+                report_data["stats"] = apply_item_cap_to_groups(report_data.get("stats"), item_cap)
+                report_data["new_titles"] = apply_item_cap_to_groups(report_data.get("new_titles"), item_cap)
+                if rss_items:
+                    rss_items = apply_item_cap_to_groups(rss_items, item_cap)
+                if rss_new_items:
+                    rss_new_items = apply_item_cap_to_groups(rss_new_items, item_cap)
 
             # 是否发送版本更新信息
             update_info_to_send = self.update_info if cfg["SHOW_VERSION_UPDATE"] else None
@@ -1120,6 +1170,8 @@ class NewsAnalyzer:
         timezone = self.ctx.timezone
         max_news_per_keyword = self.ctx.config.get("MAX_NEWS_PER_KEYWORD", 0)
         sort_by_position_first = self.ctx.config.get("SORT_BY_POSITION_FIRST", False)
+        # RSS 摘要展示配置（rss.summary）
+        summary_config = self.ctx.config.get("RSS", {}).get("SUMMARY", {})
 
         rss_stats = None
         rss_new_stats = None
@@ -1176,6 +1228,7 @@ class NewsAnalyzer:
                 timezone=timezone,
                 rank_threshold=self.rank_threshold,
                 quiet=False,
+                summary_config=summary_config,
             )
             if not rss_stats:
                 print("[RSS] 增量模式：关键词匹配后没有内容")
@@ -1200,6 +1253,7 @@ class NewsAnalyzer:
                 timezone=timezone,
                 rank_threshold=self.rank_threshold,
                 quiet=False,
+                summary_config=summary_config,
             )
             if not rss_stats:
                 print("[RSS] 当前榜单模式：关键词匹配后没有内容")
@@ -1219,6 +1273,7 @@ class NewsAnalyzer:
                     timezone=timezone,
                     rank_threshold=self.rank_threshold,
                     quiet=True,
+                    summary_config=summary_config,
                 )
 
         else:
@@ -1239,6 +1294,7 @@ class NewsAnalyzer:
                 timezone=timezone,
                 rank_threshold=self.rank_threshold,
                 quiet=False,
+                summary_config=summary_config,
             )
             if not rss_stats:
                 print("[RSS] 当日汇总模式：关键词匹配后没有内容")
@@ -1258,6 +1314,7 @@ class NewsAnalyzer:
                     timezone=timezone,
                     rank_threshold=self.rank_threshold,
                     quiet=True,
+                    summary_config=summary_config,
                 )
 
         return rss_stats, rss_new_stats, raw_rss_items, rss_new_urls
@@ -1319,6 +1376,27 @@ class NewsAnalyzer:
                     "summary": item.summary,
                     "author": item.author,
                 })
+
+        # 源未提供摘要时抓取原文提取首段兜底（rss.summary.fulltext_fallback）
+        # 每次运行最多 20 篇，URL 结果缓存避免重复抓取
+        summary_config = rss_config.get("SUMMARY", {})
+        if summary_config.get("ENABLED") and summary_config.get("FULLTEXT_FALLBACK"):
+            if self._fulltext_fetcher is None:
+                self._fulltext_fetcher = FulltextFetcher(
+                    timeout=DEFAULT_FULLTEXT_TIMEOUT,
+                    proxy_url=rss_config.get("PROXY_URL") or None,
+                )
+            fetched_count = 0
+            for rss_item in rss_items:
+                if fetched_count >= MAX_FULLTEXT_PER_RUN:
+                    break
+                if not rss_item.get("summary") and rss_item.get("url"):
+                    summary = self._fulltext_fetcher.get_summary(
+                        rss_item["url"], summary_config.get("MAX_LENGTH", 100)
+                    )
+                    if summary:
+                        rss_item["summary"] = summary
+                        fetched_count += 1
 
         # 输出过滤统计
         if filtered_count > 0:

@@ -8,6 +8,7 @@ TrendRadar AI 模块
 from .analyzer import AIAnalyzer, AIAnalysisResult
 from .filter import AIFilter, AIFilterResult
 from .filter_pipeline import AIFilterPipeline
+from .summarizer import AIItemSummarizer, create_item_summarizer
 from .translator import AITranslator, TranslationResult, BatchTranslationResult
 from .formatter import (
     get_ai_analysis_renderer,
@@ -26,6 +27,9 @@ __all__ = [
     "AIFilter",
     "AIFilterResult",
     "AIFilterPipeline",
+    # 条目摘要
+    "AIItemSummarizer",
+    "create_item_summarizer",
     # 翻译器
     "AITranslator",
     "TranslationResult",

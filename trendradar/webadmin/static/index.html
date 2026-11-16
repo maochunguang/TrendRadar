@@ -45,6 +45,11 @@
           <h2>📝 文本文件编辑</h2>
           <p class="card-hint">关键词、时间线、AI 提示词等纯文本配置；保存前自动备份</p>
           <div class="file-tabs" id="fileTabs"></div>
+          <div id="freqModeToggle" style="display:none;margin-bottom:10px">
+            <button class="btn small" id="btnFreqStructured">🧩 结构化编辑</button>
+            <button class="btn small" id="btnFreqRaw">📄 原始文本</button>
+            <span style="color:var(--text-muted);font-size:12px;margin-left:8px">结构化模式按词组增删关键词；保存时自动序列化并校验</span>
+          </div>
           <details class="syntax-help" id="freqSyntaxHelp" style="display:none">
             <summary>frequency_words.txt 语法说明</summary>
             <pre>- 每个词组由空行分隔，词组内任意词命中即匹配
@@ -54,7 +59,8 @@
 - 支持正则：/pattern/  支持别名：词[别名]</pre>
           </details>
           <textarea class="code" id="textEditor" spellcheck="false"></textarea>
-          <div class="btn-row">
+          <div id="freqStructured"></div>
+          <div class="btn-row" id="textEditorActions">
             <button class="btn primary" id="btnSaveText">💾 保存文件</button>
             <span id="textEditorStatus" style="color:var(--text-muted);font-size:12.5px"></span>
           </div>
@@ -65,9 +71,8 @@
       <section class="panel" id="panel-raw">
         <div class="card">
           <h2>🛠 原始 config.yaml 编辑</h2>
-          <p class="card-hint">
-            兜底编辑器，可修改所有配置项（密钥字段已脱敏，无法通过此处修改）。
-            保存前进行语法与结构校验。
+          <p class="card-hint" id="rawEditorHint">
+            兜底编辑器，可修改所有配置项。保存前进行语法与结构校验。
           </p>
           <textarea class="code" id="rawEditor" spellcheck="false"></textarea>
           <div class="btn-row">
@@ -87,6 +92,25 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- OPML 导入弹窗 -->
+  <div class="modal-mask" id="opmlMask">
+    <div class="modal">
+      <h3>📥 导入 OPML 订阅列表</h3>
+      <div class="modal-body">
+        <p style="color:var(--text-muted);font-size:12.5px">
+          粘贴从 Inoreader / Feedly / Reeder 等阅读器导出的 OPML 文件内容，
+          或点击下方按钮选择文件。已存在的订阅地址会自动跳过。
+        </p>
+        <input type="file" id="opmlFile" accept=".opml,.xml,text/xml" style="margin:10px 0">
+        <textarea id="opmlContent" class="code" rows="8" style="min-height:140px" placeholder="&lt;opml version=&quot;2.0&quot;&gt; ..."></textarea>
+        <div class="btn-row">
+          <button class="btn primary" id="btnOpmlImport">导入</button>
+          <button class="btn" id="btnOpmlCancel">取消</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 登录弹窗 -->
