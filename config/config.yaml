@@ -148,6 +148,15 @@ rss:
       name: "雅虎财经"
       url: "https://finance.yahoo.com/news/rssindex"
 
+    # 国际时事源（2026-11-17 新增，配合 [国际时事] 词组）
+    - id: "bbc-world"
+      name: "BBC 国际新闻"
+      url: "https://feeds.bbci.co.uk/news/world/rss.xml"
+
+    - id: "bbc-zhongwen"
+      name: "BBC 中文网"
+      url: "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml"
+
     # 自定义源示例
     # - id: "custom-feed"
     #   name: "自定义源"
