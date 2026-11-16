@@ -1143,7 +1143,7 @@ function renderDataServiceCard(s) {
     ["JSON 搜索", `${base}/api/news/search?q=关键词&days=7`],
   ];
   const kwNote = state.newsGroups
-    ? state.dataServiceGroups.map(g => `${base}/feed/kw-${encodeURIComponent(g)}.xml${t}`).join("<br>")
+    ? state.newsGroups.map(g => `${base}/feed/kw-${encodeURIComponent(g)}.xml${t}`).join("<br>")
     : "";
 
   $("dataServiceCard").innerHTML = `
