@@ -275,6 +275,14 @@
 - **提示**：建议查看【历史更新】，明确具体的【功能内容】
 
 
+### 2026/11/17 - v6.11.0-datasource
+
+- **🔥 新闻数据服务**：TrendRadar 可作为其他系统的新闻数据源——
+  - **RSS 订阅源**：`/feed/all.xml`（热榜+RSS）、`/feed/hotlist.xml`、`/feed/rss.xml`（含摘要）、`/feed/kw-{词组}.xml`（按你的关键词词组过滤），任何 RSS 阅读器/系统直接订阅
+  - **JSON API**：`/api/news/hotlist`、`/api/news/rss`、`/api/news/search`（按日期/天数/关键词查询，含排名与摘要）
+  - **鉴权**：`NEWS_API_TOKEN` 设置后需 `?token=` 或 `X-API-Token` 头；设置中心的概览页展示全部可复制地址
+  - 典型用法：接入 daily_stock_analysis 等项目作为资讯数据源（词组如"股票/A股"生成专属财经订阅源）
+
 ### 2026/11/16 - v6.11.0-content
 
 - **🔥 推送带摘要，看完不必点原文**：新增 `rss.summary` 配置——推送/网页报告展示 RSS 文章摘要（可配截断长度）；源未提供摘要时可开启 `fulltext_fallback` 抓取原文提取首段；新增 `ai_summary` 配置为热榜条目生成 AI 一句话摘要（可选、限额）

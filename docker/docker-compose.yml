@@ -19,6 +19,8 @@ services:
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
       # 是否允许页面直接编辑密钥（true 开启，默认只读）
       - EDIT_SECRETS=${EDIT_SECRETS:-}
+      # 新闻数据服务令牌（/feed/* 与 /api/news/*，留空开放）
+      - NEWS_API_TOKEN=${NEWS_API_TOKEN:-}
       # 通知渠道
       - FEISHU_WEBHOOK_URL=${FEISHU_WEBHOOK_URL:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}

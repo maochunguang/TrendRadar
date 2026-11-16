@@ -74,6 +74,11 @@ class AdminAuthMiddleware(BaseHTTPMiddleware):
         if not path.startswith("/api"):
             return await call_next(request)
 
+        # 新闻数据服务使用独立的 NEWS_API_TOKEN（在各 handler 内校验），
+        # 不要求管理员 token —— 供外部系统（如 daily_stock_analysis）程序化拉取
+        if path.startswith("/api/news"):
+            return await call_next(request)
+
         token = os.environ.get("ADMIN_TOKEN", "").strip()
         ip = request.client.host if request.client else "unknown"
 
@@ -137,6 +142,12 @@ def create_app() -> Starlette:
         Route("/api/rss/opml", api.post_rss_opml, methods=["POST"]),
         Route("/api/frequency", api.get_frequency_structured, methods=["GET"]),
         Route("/api/frequency", api.put_frequency_structured, methods=["PUT"]),
+        Route("/api/news/dates", api.get_news_dates, methods=["GET"]),
+        Route("/api/news/hotlist", api.get_news_hotlist, methods=["GET"]),
+        Route("/api/news/rss", api.get_news_rss, methods=["GET"]),
+        Route("/api/news/search", api.get_news_search, methods=["GET"]),
+        Route("/api/news/groups", api.get_news_groups, methods=["GET"]),
+        Route("/feed/{name:path}", api.get_feed, methods=["GET"]),
         Route("/api/run", api.post_run, methods=["POST"]),
         Route("/api/run/status", api.get_run_status, methods=["GET"]),
         Route("/api/run/logs", api.get_run_logs, methods=["GET"]),

@@ -13,12 +13,12 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
-from trendradar.webadmin import config_io, runner
+from trendradar.webadmin import config_io, news_data, runner
 from trendradar.webadmin.frequency_editor import (
     parse_frequency,
     serialize_frequency,
@@ -91,6 +91,12 @@ async def get_status(request: Request) -> JSONResponse:
     except OSError:
         pass
 
+    # 数据服务 token：仅在管理员鉴权已启用时返回值（避免公开页面泄露）
+    news_token_enabled = bool(os.environ.get("NEWS_API_TOKEN", "").strip())
+    news_token_value = os.environ.get("NEWS_API_TOKEN", "").strip() if (
+        news_token_enabled and os.environ.get("ADMIN_TOKEN", "").strip()
+    ) else ""
+
     return _json_ok({
         "version": APP_VERSION,
         "cron_schedule": os.environ.get("CRON_SCHEDULE", ""),
@@ -99,6 +105,8 @@ async def get_status(request: Request) -> JSONResponse:
         "supercronic_pid1": supercronic_pid1,
         "admin_auth_enabled": bool(os.environ.get("ADMIN_TOKEN", "").strip()),
         "secrets_editable": config_io.secrets_editable(),
+        "news_token_enabled": news_token_enabled,
+        "news_token": news_token_value,
         "config_files": config_files,
         "last_run_log": logs[0]["name"] if logs else None,
         "last_run_time": logs[0]["mtime"] if logs else None,
@@ -370,6 +378,168 @@ async def post_rss_opml(request: Request) -> JSONResponse:
         "skipped": skipped,
         "warnings": warnings,
     })
+
+
+# ═══════════════════════════════════════════════════════
+# 新闻数据服务（RSS 输出 + JSON 查询 API）
+# ═══════════════════════════════════════════════════════
+
+
+def news_token_ok(request: Request) -> bool:
+    """
+    新闻数据接口鉴权：NEWS_API_TOKEN 未设置时开放（与报告静态托管一致）；
+    设置后要求 ?token= 或 X-API-Token 头（RSS 阅读器无法带自定义头，走 query 参数）
+    """
+    token = os.environ.get("NEWS_API_TOKEN", "").strip()
+    if not token:
+        return True
+    import hmac as _hmac
+    provided = request.query_params.get("token", "") or request.headers.get("X-API-Token", "")
+    return _hmac.compare_digest(provided, token)
+
+
+def _int_param(request: Request, name: str, default: int) -> int:
+    try:
+        return int(request.query_params.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+async def get_news_dates(request: Request) -> JSONResponse:
+    """可用数据日期（热榜/RSS）"""
+    if not news_token_ok(request):
+        return _json_error("token 无效", 401)
+    return _json_ok(news_data.list_news_dates())
+
+
+async def get_news_hotlist(request: Request) -> JSONResponse:
+    """热榜条目查询：?date=YYYY-MM-DD 或 ?days=N&limit=M"""
+    if not news_token_ok(request):
+        return _json_error("token 无效", 401)
+    date = request.query_params.get("date") or None
+    days = _int_param(request, "days", 1)
+    limit = _int_param(request, "limit", news_data.DEFAULT_LIMIT)
+    items = news_data.get_hotlist(date=date, days=days)[:max(1, min(limit, news_data.MAX_ITEMS))]
+    for item in items:
+        item["source_type"] = "hotlist"
+    return _json_ok({"count": len(items), "items": items})
+
+
+async def get_news_rss(request: Request) -> JSONResponse:
+    """RSS 条目查询（含摘要）：?date= / ?days= / ?feed=ID&limit=M"""
+    if not news_token_ok(request):
+        return _json_error("token 无效", 401)
+    date = request.query_params.get("date") or None
+    days = _int_param(request, "days", 1)
+    feed = request.query_params.get("feed") or None
+    limit = _int_param(request, "limit", news_data.DEFAULT_LIMIT)
+    items = news_data.get_rss_items(date=date, days=days, feed_id=feed)[:max(1, min(limit, news_data.MAX_ITEMS))]
+    for item in items:
+        item["source_type"] = "rss"
+    return _json_ok({"count": len(items), "items": items})
+
+
+async def get_news_search(request: Request) -> JSONResponse:
+    """跨热榜与 RSS 搜索：?q=关键词&days=7&limit=M"""
+    if not news_token_ok(request):
+        return _json_error("token 无效", 401)
+    query = request.query_params.get("q", "")
+    days = _int_param(request, "days", 7)
+    limit = _int_param(request, "limit", news_data.DEFAULT_LIMIT)
+    items = news_data.search_news(query, days=days, limit=limit)
+    return _json_ok({"count": len(items), "items": items})
+
+
+async def get_news_groups(request: Request) -> JSONResponse:
+    """列出可订阅的关键词词组（用于 /feed/kw-{词组}.xml）"""
+    if not news_token_ok(request):
+        return _json_error("token 无效", 401)
+    from trendradar.core.frequency import load_frequency_words
+    try:
+        groups, _, _ = load_frequency_words()
+    except FileNotFoundError:
+        return _json_ok({"groups": []})
+    named = []
+    for g in groups:
+        name = g.get("display_name") or g.get("group_key") or ""
+        if name:
+            named.append({"name": name, "count": sum(len(w) for w in (g.get("normal", []), g.get("required", [])))})
+    return _json_ok({"groups": named})
+
+
+def _feed_limit(request: Request) -> int:
+    return max(1, min(_int_param(request, "limit", news_data.DEFAULT_LIMIT), news_data.MAX_ITEMS))
+
+
+def _parse_feed_name(name: str) -> tuple:
+    """'all.xml' → ('all', None)；'kw-华为.xml' → ('kw', '华为')"""
+    base = name[:-4] if name.endswith(".xml") else name
+    if base.startswith("kw-"):
+        return "kw", base[3:]
+    return base, None
+
+
+def _hotlist_to_feed_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for item in items:
+        item.setdefault("source_type", "hotlist")
+    return items
+
+
+async def get_feed(request: Request) -> Response:
+    """
+    RSS 2.0 订阅源：
+    - /feed/all.xml       热榜 + RSS（合并）
+    - /feed/hotlist.xml   仅热榜
+    - /feed/rss.xml       仅 RSS（含摘要）
+    - /feed/kw-{词组}.xml 按关键词词组过滤的热榜
+    支持 ?limit=N 与 ?token=（NEWS_API_TOKEN 设置时）
+    """
+    if not news_token_ok(request):
+        return JSONResponse({"error": "token 无效"}, status_code=401)
+
+    name = request.path_params["name"]
+    kind, group = _parse_feed_name(name)
+    if kind not in ("all", "rss", "hotlist", "kw"):
+        return JSONResponse({"error": "未知订阅源，可用: all / hotlist / rss / kw-{词组}.xml"}, status_code=404)
+
+    limit = _feed_limit(request)
+    site = str(request.base_url).rstrip("/")
+
+    if kind == "rss":
+        items = news_data.get_rss_items(days=1)[:limit]
+        for item in items:
+            item["source_type"] = "rss"
+        title, desc = "TrendRadar RSS 订阅", "RSS 订阅源文章（含摘要）"
+    elif kind == "hotlist":
+        items = _hotlist_to_feed_items(news_data.get_hotlist(days=1))[:limit]
+        title, desc = "TrendRadar 热榜", "多平台热点榜单"
+    elif kind == "kw":
+        from trendradar.core.frequency import load_frequency_words, matches_word_groups
+        try:
+            groups, filter_words, global_filters = load_frequency_words()
+        except FileNotFoundError:
+            return Response("frequency_words.txt 不存在", status_code=404)
+        target = next(
+            (g for g in groups if (g.get("display_name") or g.get("group_key") or "").lower() == (group or "").lower()),
+            None,
+        )
+        if target is None:
+            return JSONResponse({"error": f"词组不存在: {group}"}, status_code=404)
+        raw_items = news_data.get_hotlist(days=1)
+        matched = [it for it in raw_items if matches_word_groups(it.get("title", ""), [target], filter_words, global_filters)]
+        items = _hotlist_to_feed_items(matched)[:limit]
+        title = f"TrendRadar 关键词订阅: {target.get('display_name') or target.get('group_key')}"
+        desc = "按词组过滤的热点新闻"
+    else:  # all
+        hotlist = _hotlist_to_feed_items(news_data.get_hotlist(days=1))[: limit // 2 or limit]
+        rss_items = news_data.get_rss_items(days=1)[: limit - len(hotlist)]
+        for item in rss_items:
+            item["source_type"] = "rss"
+        items = hotlist + rss_items
+        title, desc = "TrendRadar 新闻聚合", "热榜 + RSS 订阅（含摘要）"
+
+    xml = news_data.build_rss_feed(title, f"{site}/settings", desc, items, max_items=limit)
+    return Response(content=xml, media_type="application/rss+xml; charset=utf-8")
 
 
 # ═══════════════════════════════════════════════════════

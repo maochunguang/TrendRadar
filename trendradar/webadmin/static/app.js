@@ -17,6 +17,8 @@ const state = {
   activeFileText: "",
   activeLog: null,
   freqModel: { header: "", global_filters: [], filters: [], groups: [] },
+  newsToken: "",
+  newsGroups: [],
   freqMode: "structured",
   pollTimer: null,
 };
@@ -1122,10 +1124,47 @@ function renderOverview() {
   `;
 
   refreshOverviewLog();
+  renderDataServiceCard(s);
 
   if (!s.admin_auth_enabled) {
     document.querySelectorAll(".btn-save-config, #btnSaveText, #btnSaveRaw, #btnSaveFreq").forEach(b => b.disabled = true);
   }
+}
+
+function renderDataServiceCard(s) {
+  const base = location.origin;
+  const token = state.newsToken || "";
+  const t = token ? `?token=${encodeURIComponent(token)}` : "";
+  const rows = [
+    ["RSS 全部（热榜+RSS）", `${base}/feed/all.xml${t}`],
+    ["RSS 热榜", `${base}/feed/hotlist.xml${t}`],
+    ["RSS 订阅源文章", `${base}/feed/rss.xml${t}`],
+    ["JSON 热榜", `${base}/api/news/hotlist?days=1${token ? `&token=${encodeURIComponent(token)}` : ""}`],
+    ["JSON 搜索", `${base}/api/news/search?q=关键词&days=7`],
+  ];
+  const kwNote = state.newsGroups
+    ? state.dataServiceGroups.map(g => `${base}/feed/kw-${encodeURIComponent(g)}.xml${t}`).join("<br>")
+    : "";
+
+  $("dataServiceCard").innerHTML = `
+    <table style="width:100%;font-size:12.5px;border-collapse:collapse">
+      ${rows.map(([label, url]) => `
+        <tr>
+          <td style="padding:5px 8px 5px 0;white-space:nowrap;color:var(--text-muted)">${label}</td>
+          <td style="padding:5px 0"><code style="word-break:break-all">${escapeHtml(url)}</code></td>
+          <td style="padding:5px;white-space:nowrap"><button class="btn small" data-copy="${escapeHtml(url)}">复制</button></td>
+        </tr>`).join("")}
+    </table>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:6px">
+      ${s.news_token_enabled ? "🔒 已启用 NEWS_API_TOKEN（URL 需带 ?token=）" : "未设置 NEWS_API_TOKEN（本地绑定下可直接访问；对外暴露时建议设置）"}
+      <br>按关键词词组订阅：${kwNote || "见「文本文件」页词组，地址格式 /feed/kw-{词组名}.xml"}
+    </div>`;
+
+  $("dataServiceCard").querySelectorAll("button[data-copy]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      navigator.clipboard.writeText(btn.dataset.copy).then(() => toast("已复制", "success"));
+    });
+  });
 }
 
 async function refreshOverviewLog() {
@@ -1275,6 +1314,12 @@ async function boot(rerender = true) {
   try {
     state.status = await api("/api/status");
     state.textFiles = state.status.text_files || [];
+    state.newsToken = state.status.news_token || "";
+    state.newsGroups = [];
+    try {
+      const groupsData = await api("/api/news/groups");
+      state.newsGroups = (groupsData.groups || []).map(g => g.name);
+    } catch { /* 词组未配置时忽略 */ }
     if (state.status.admin_auth_enabled && !state.token) { showLogin(); return; }
     await loadStructuredConfig();
 
