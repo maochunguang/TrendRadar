@@ -734,6 +734,20 @@ def render_html_content(
                 font-size: 13px;
                 line-height: 1.6;
                 margin-top: 4px;
+                /* 默认截断 2 行，点击展开看全文（长摘要不撑爆卡片） */
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                cursor: pointer;
+            }
+
+            .rss-summary.summary-expanded,
+            .item-summary.summary-expanded {
+                display: block;
+                -webkit-line-clamp: unset;
+                overflow: visible;
+                cursor: default;
             }
 
             .item-summary {
@@ -741,6 +755,11 @@ def render_html_content(
                 font-size: 13px;
                 line-height: 1.6;
                 margin-top: 2px;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                cursor: pointer;
             }
 
             .also-in {
@@ -2474,6 +2493,21 @@ def render_html_content(
                 }
             }
 
+            // 摘要展开/收起：仅对实际被截断（溢出）的摘要启用点击交互
+            function initSummaryToggle() {
+                document.querySelectorAll('.rss-summary, .item-summary').forEach(function(el) {
+                    if (el.scrollHeight <= el.clientHeight + 2) {
+                        el.style.cursor = 'default';
+                        return;
+                    }
+                    el.title = '点击展开/收起摘要';
+                    el.addEventListener('click', function() {
+                        el.classList.toggle('summary-expanded');
+                        el.title = el.classList.contains('summary-expanded') ? '点击收起摘要' : '点击展开/收起摘要';
+                    });
+                });
+            }
+
             // 独立展示区 Tab 切换
             function initStandaloneTabs() {
                 var tabBar = document.querySelector('.standalone-tab-bar');
@@ -3148,6 +3182,7 @@ def render_html_content(
                 initTabs();
                 initBackToTop();
                 initCollapse();
+                initSummaryToggle();
                 initStandaloneTabs();
 
                 // 键盘快捷键

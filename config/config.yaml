@@ -116,7 +116,7 @@ rss:
   # 摘要显示（在推送消息和网页报告中展示文章摘要，看完摘要可不点原文）
   summary:
     enabled: true                     # 是否显示摘要（true=显示, false=隐藏）
-    max_length: 100                   # 摘要最大长度（字符，0=不截断）
+    max_length: 0                     # 摘要最大长度（字符，0=不截断，展示源提供的全文）
     fulltext_fallback: false          # 源未提供摘要时抓取原文提取首段（true=开启, false=关闭）
                                       # 有网络开销，每次运行最多抓取 20 篇，超时 10 秒
 
@@ -497,7 +497,7 @@ ai_analysis:
 # 消耗 token：每次运行最多 MAX_ITEMS 条 × 一次批量调用
 # ===============================================================
 ai_summary:
-  enabled: false                    # 是否启用（true=启用, false=关闭）
+  enabled: true                     # 是否启用（true=启用, false=关闭）
   max_items: 20                     # 每次运行最多生成摘要的条数（按显示顺序取前 N 条）
   max_chars: 60                     # 单条摘要最大长度（字符）
   batch_size: 10                    # 每批发送给 AI 的标题数

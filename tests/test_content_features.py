@@ -444,3 +444,33 @@ class PrepareReportDataTests(unittest.TestCase):
         self.assertEqual(title["ai_summary"], "华为发布新旗舰")
         self.assertEqual(title["summary"], "原文摘要")
         self.assertEqual(title["matched_keyword"], "华为")
+
+
+class SummaryExpandTests(unittest.TestCase):
+    """网页摘要：默认 2 行截断 + 点击展开；max_length=0 时展示源全文"""
+
+    def test_max_length_zero_keeps_full_text(self):
+        from trendradar.utils.text import clean_summary_text
+
+        text = "很" * 400
+        self.assertEqual(clean_summary_text(text, 0), text)
+
+    def test_report_contains_clamp_and_toggle(self):
+        from trendradar.report.html import render_html_content
+
+        rd = {
+            "stats": [], "new_titles": [], "total_new_count": 0,
+            "failed_ids": [], "rss_matched_count": 0,
+        }
+        rss_items = [{
+            "word": "rss", "count": 1, "position": 1,
+            "titles": [{
+                "title": "RSS 标题", "source_name": "BBC", "url": "https://e.com",
+                "mobile_url": "", "ranks": [], "rank_threshold": 5, "count": 1,
+                "time_display": "", "summary": "很" * 400,
+            }],
+        }]
+        html = render_html_content(rd, total_titles=0, rss_items=rss_items)
+        self.assertIn("-webkit-line-clamp: 2", html)
+        self.assertIn("initSummaryToggle", html)
+        self.assertIn("summary-expanded", html)
