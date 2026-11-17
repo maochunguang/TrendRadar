@@ -1151,6 +1151,7 @@ class NewsAnalyzer:
             if ann_items:
                 rss_data.items["announcements"] = ann_items
                 rss_data.id_to_name["announcements"] = ann_items[0].feed_name
+                print(f"[公告] 获取 {len(ann_items)} 条公告")
 
             self._rss_source_total = len(feeds) + (1 if ann_used else 0)
             self._rss_source_failed = (
