@@ -419,3 +419,28 @@ class HtmlAiSummaryRenderTests(unittest.TestCase):
         del data["stats"][0]["titles"][0]["ai_summary"]
         html = render_html_content(data, total_titles=1)
         self.assertNotIn('<div class="item-summary">', html)
+
+
+class PrepareReportDataTests(unittest.TestCase):
+    """prepare_report_data 重建 title_data 时应保留可选展示字段"""
+
+    def test_preserves_ai_summary_and_matched_keyword(self):
+        from trendradar.report.generator import prepare_report_data
+
+        stats = [{
+            "word": "华为", "count": 1, "percentage": 10,
+            "titles": [{
+                "title": "华为发布新机", "source_name": "微博",
+                "time_display": "", "count": 1, "ranks": [1],
+                "rank_threshold": 5, "url": "", "mobile_url": "",
+                "is_new": False, "rank_timeline": [],
+                "ai_summary": "华为发布新旗舰",
+                "summary": "原文摘要",
+                "matched_keyword": "华为",
+            }],
+        }]
+        rd = prepare_report_data(stats, mode="daily")
+        title = rd["stats"][0]["titles"][0]
+        self.assertEqual(title["ai_summary"], "华为发布新旗舰")
+        self.assertEqual(title["summary"], "原文摘要")
+        self.assertEqual(title["matched_keyword"], "华为")

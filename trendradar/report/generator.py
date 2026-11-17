@@ -116,6 +116,10 @@ def prepare_report_data(
                 "mobile_url": title_data.get("mobileUrl", ""),
                 "is_new": title_data.get("is_new", False),
                 "rank_timeline": title_data.get("rank_timeline", []),
+                # 可选展示字段（AI 一句话摘要/命中标签），缺失时保持原样
+                "ai_summary": title_data.get("ai_summary", ""),
+                "summary": title_data.get("summary", ""),
+                "matched_keyword": title_data.get("matched_keyword", ""),
             }
             processed_titles.append(processed_title)
 
