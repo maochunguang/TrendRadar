@@ -21,6 +21,12 @@ _BARE_URL_LINE_RE = re.compile(r"^https?://\S+\s*$")
 _METADATA_LINE_RE = re.compile(r"^#?\s*(points|score|votes|comments)\s*:\s*\d+\s*$", re.IGNORECASE)
 # 匹配悬空标签行（URL 行被过滤后剩下的 "Article URL:" 之类）
 _DANGLING_LABEL_RE = re.compile(r"^[A-Za-z#][A-Za-z0-9 #]{0,20}:$")
+# HN RSS（hnrss）的 description 签名与元数据段：
+# "Article URL: <url> Comments URL: <url> Points: N # Comments: M"（单行多段，无正文）
+_HNRSS_SIGNATURE_RE = re.compile(r"^\s*Article URL:\s*\S+", re.IGNORECASE)
+_HNRSS_METADATA_RE = re.compile(
+    r"(?:Article URL|Comments URL):\s*\S+|#\s*Comments:\s*\d+|\bPoints:\s*\d+"
+)
 _PUNCT_ONLY_RE = re.compile(r"^[\s|·，,、;；.。]*$")
 
 
@@ -44,6 +50,10 @@ def clean_summary_text(text: Optional[str], max_length: int = 100) -> str:
     cleaned = _SCRIPT_STYLE_RE.sub(" ", text)
     cleaned = _TAG_RE.sub("\n", cleaned)
     cleaned = html.unescape(cleaned)
+
+    # hnrss 的 description 整体是元数据段组合（签名匹配时才剥除，避免误伤正常文本）
+    if _HNRSS_SIGNATURE_RE.match(cleaned):
+        cleaned = _HNRSS_METADATA_RE.sub(" ", cleaned)
 
     # 逐行过滤纯链接行与纯数字元数据行，再压缩空白
     kept_lines = []
