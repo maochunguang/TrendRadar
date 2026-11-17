@@ -39,6 +39,20 @@ class CleanSummaryTests(unittest.TestCase):
         self.assertEqual(clean_summary_text("", 100), "")
         self.assertEqual(clean_summary_text(None, 100), "")
 
+    def test_drops_link_only_lines(self):
+        # HN RSS 的 description 是 "Article URL: ... Comments URL: ..." 纯链接行
+        text = ('<p>Article URL: <a href="https://a.com">https://a.com</a></p>'
+                '<p>Comments URL: https://news.ycombinator.com/item?id=1</p>'
+                '<p>Points: 128</p> <p># Comments: 30</p>')
+        self.assertEqual(clean_summary_text(text, 100), "")
+
+    def test_keeps_real_content_after_link_lines(self):
+        text = ('<p>Article URL: https://a.com</p>'
+                '<p>Comments URL: https://b.com</p>'
+                '<p>OpenAI 发布新模型，能力提升明显</p>')
+        result = clean_summary_text(text, 100)
+        self.assertEqual(result, "OpenAI 发布新模型，能力提升明显")
+
 
 class AnalyzerSummaryTests(unittest.TestCase):
 
