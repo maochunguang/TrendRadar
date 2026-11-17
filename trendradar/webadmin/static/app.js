@@ -428,6 +428,11 @@ function renderSources() {
         <button class="btn small" id="btnAddFeed" style="margin-top:6px">＋ 添加 RSS 源</button>
       </div>
     </div>
+    <div class="card">
+      <h2>公司公告采集</h2>
+      <p class="card-hint">拉取沪深京上市公司公告，转成 RSS 条目参与词组过滤（如 [财经股票] 的 业绩预告/并购重组/减持），订阅源 /feed/kw-财经股票.xml 会自动带上命中的公告；需保持 RSS 抓取开启。想看全部公告可在「报告与筛选」的独立展示区加入 announcements</p>
+      <div id="annFields"></div>
+    </div>
     ${saveBar()}`;
 
   // 标量字段
@@ -440,9 +445,19 @@ function renderSources() {
     { path: "rss.summary.fulltext_fallback", label: "无摘要时抓取原文提取", type: "bool", hint: "有网络开销，每次运行最多 20 篇、超时 10 秒" },
     { path: "rss.freshness_filter.enabled", label: "启用新鲜度过滤", type: "bool" },
     { path: "rss.freshness_filter.max_age_days", label: "最大文章年龄（天）", type: "number", hint: "0 = 推送所有文章" },
+    { path: "announcements.enabled", label: "启用公司公告采集", type: "bool", hint: "沪深京上市公司公告，走词组过滤与推送链路" },
+    { path: "announcements.source", label: "公告数据源", type: "select", options: [
+      ["eastmoney", "东方财富（全市场，支持股票池）"],
+      ["cninfo", "巨潮资讯（官方披露平台，支持分类）"],
+      ["both", "两者都拉取"],
+    ] },
+    { path: "announcements.max_items", label: "公告每次最多采集条数", type: "number", hint: "0 = 不采集" },
+    { path: "announcements.stock_pool", label: "自选股票代码（仅东方财富生效）", type: "csvlist", hint: "示例：600519, 300750；留空 = 全市场最新公告" },
+    { path: "announcements.categories", label: "巨潮公告分类代码（仅巨潮生效）", type: "csvlist", hint: "示例：category_ndbg_szsh（年报）；留空 = 全部分类" },
   ];
   $("platformFields").innerHTML = renderField(scalars[0]) + renderField(scalars[1]);
-  $("rssFields").innerHTML = scalars.slice(2).map(renderField).join("");
+  $("rssFields").innerHTML = scalars.slice(2, 8).map(renderField).join("");
+  $("annFields").innerHTML = scalars.slice(8).map(renderField).join("");
   bindFieldEvents(container);
 
   renderSourceList();

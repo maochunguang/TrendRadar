@@ -134,5 +134,36 @@ def patch_dict_env(env):
     return patch.dict(os.environ, env)
 
 
+class KwFeedIncludesRssTests(NewsDataBase):
+    """kw 词组订阅源应同时并入词组命中的 RSS 条目（含公司公告）"""
+
+    def _run_get_feed(self, name):
+        import asyncio
+
+        from trendradar.webadmin.api import get_feed
+
+        req = type("R", (), {
+            "path_params": {"name": name},
+            "query_params": {},
+            "headers": {},
+            "base_url": "http://testserver/",
+        })()
+        return asyncio.run(get_feed(req))
+
+    def test_kw_feed_merges_matched_rss(self):
+        # 词组文件：命中 fixture RSS 标题中的"芯片"
+        cfg_dir = os.path.join(os.getcwd(), "config")
+        os.makedirs(cfg_dir, exist_ok=True)
+        with open(os.path.join(cfg_dir, "frequency_words.txt"), "w", encoding="utf-8") as f:
+            f.write("[测试组]\n芯片\n")
+
+        resp = self._run_get_feed("kw-测试组.xml")
+        self.assertEqual(resp.status_code, 200)
+        xml = resp.body.decode("utf-8")
+        # 词组命中的 RSS 条目并入；未命中的热榜条目不出现
+        self.assertIn("AI 芯片新突破", xml)
+        self.assertNotIn("某地发生地震", xml)
+
+
 if __name__ == "__main__":
     unittest.main()

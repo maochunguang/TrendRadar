@@ -527,9 +527,18 @@ async def get_feed(request: Request) -> Response:
             return JSONResponse({"error": f"词组不存在: {group}"}, status_code=404)
         raw_items = news_data.get_hotlist(days=1)
         matched = [it for it in raw_items if matches_word_groups(it.get("title", ""), [target], filter_words, global_filters)]
-        items = _hotlist_to_feed_items(matched)[:limit]
+        items = _hotlist_to_feed_items(matched)
+        # RSS 条目（含公司公告）同样按词组匹配并入，标题命中词组即出现在订阅源
+        rss_raw = news_data.get_rss_items(days=1)
+        rss_matched = [
+            it for it in rss_raw
+            if matches_word_groups(it.get("title", ""), [target], filter_words, global_filters)
+        ]
+        for it in rss_matched:
+            it.setdefault("source_type", "rss")
+        items = (items + rss_matched)[:limit]
         title = f"TrendRadar 关键词订阅: {target.get('display_name') or target.get('group_key')}"
-        desc = "按词组过滤的热点新闻"
+        desc = "按词组过滤的热点新闻（热榜 + RSS/公告）"
     else:  # all
         hotlist = _hotlist_to_feed_items(news_data.get_hotlist(days=1))[: limit // 2 or limit]
         rss_items = news_data.get_rss_items(days=1)[: limit - len(hotlist)]

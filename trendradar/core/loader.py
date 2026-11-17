@@ -226,6 +226,56 @@ def _load_rss_config(config_data: Dict) -> Dict:
     }
 
 
+def _load_announcements_config(config_data: Dict) -> Dict:
+    """加载上市公司公告采集配置（复用 RSS 存储与过滤链路）"""
+    ann = config_data.get("announcements", {}) or {}
+    advanced = config_data.get("advanced", {})
+    advanced_rss = advanced.get("rss", {})
+    advanced_crawler = advanced.get("crawler", {})
+
+    # 代理复用 RSS 的代理设置（与 RSS 同链路，走同一出口）
+    proxy_url = advanced_rss.get("proxy_url", "") or advanced_crawler.get("default_proxy", "")
+
+    source = ann.get("source", "eastmoney")
+    if source not in ("eastmoney", "cninfo", "both"):
+        print(f"[警告] announcements.source 取值无效 ({source})，使用默认 eastmoney")
+        source = "eastmoney"
+
+    try:
+        max_items = int(ann.get("max_items", 30))
+    except (ValueError, TypeError):
+        print(f"[警告] announcements.max_items 格式错误 ({ann.get('max_items')})，使用默认值 30")
+        max_items = 30
+    max_items = max(0, min(max_items, 100))
+
+    # 股票代码池 / 公告分类：逐项清洗空值
+    stock_pool = []
+    for code in ann.get("stock_pool", []) or []:
+        if code is None:
+            continue
+        code = str(code).strip()
+        if code:
+            stock_pool.append(code)
+    categories = []
+    for category in ann.get("categories", []) or []:
+        if category is None:
+            continue
+        category = str(category).strip()
+        if category:
+            categories.append(category)
+
+    return {
+        "ENABLED": ann.get("enabled", False),
+        "SOURCE": source,
+        "MAX_ITEMS": max_items,
+        "STOCK_POOL": stock_pool,
+        "CATEGORIES": categories,
+        "TIMEOUT": advanced_rss.get("timeout", 15),
+        "USE_PROXY": advanced_rss.get("use_proxy", False),
+        "PROXY_URL": proxy_url,
+    }
+
+
 def _load_display_config(config_data: Dict) -> Dict:
     """加载推送内容显示配置"""
     display = config_data.get("display", {})
@@ -634,6 +684,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     # RSS 配置
     config["RSS"] = _load_rss_config(config_data)
+
+    # 上市公司公告采集配置（复用 RSS 链路）
+    config["ANNOUNCEMENTS"] = _load_announcements_config(config_data)
 
     # AI 模型共享配置
     config["AI"] = _load_ai_config(config_data)

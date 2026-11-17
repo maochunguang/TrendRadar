@@ -1035,6 +1035,28 @@ class NewsAnalyzer:
 
         return results, id_to_name, failed_ids
 
+    def _crawl_announcement_items(self, timeout: int, proxy_url: str) -> Tuple[List, List[str]]:
+        """
+        拉取上市公司公告（config.announcements.enabled 控制）
+
+        Returns:
+            (公告 RSSItem 列表, 错误/警告列表)；未启用返回空
+        """
+        ann_config = self.ctx.config.get("ANNOUNCEMENTS", {})
+        if not ann_config.get("ENABLED"):
+            return [], []
+        try:
+            from trendradar.crawler.announcements import fetch_announcements
+
+            return fetch_announcements(
+                ann_config,
+                timezone=self.ctx.config.get("TIMEZONE", DEFAULT_TIMEZONE),
+                timeout=timeout,
+                proxy_url=proxy_url,
+            )
+        except Exception as e:
+            return [], [f"抓取失败: {e}"]
+
     def _crawl_rss_data(self) -> Tuple[Optional[List[Dict]], Optional[List[Dict]], Optional[List[Dict]], set]:
         """
         执行 RSS 数据抓取
@@ -1116,8 +1138,23 @@ class NewsAnalyzer:
             # 抓取数据
             rss_data = fetcher.fetch_all()
 
-            self._rss_source_total = len(feeds)
-            self._rss_source_failed = len(rss_data.failed_ids)
+            # 上市公司公告：转换为 RSS 条目并入同一数据集（feed_id 固定 announcements），
+            # 复用词组过滤/存储/订阅源链路；失败不影响 RSS 主流程
+            ann_items, ann_errors = self._crawl_announcement_items(
+                timeout=rss_config.get("TIMEOUT", 15),
+                proxy_url=rss_proxy_url if rss_config.get("USE_PROXY", False) else "",
+            )
+            for err in ann_errors:
+                print(f"[公告] {err}")
+            ann_used = bool(ann_items or ann_errors)
+            if ann_items:
+                rss_data.items["announcements"] = ann_items
+                rss_data.id_to_name["announcements"] = ann_items[0].feed_name
+
+            self._rss_source_total = len(feeds) + (1 if ann_used else 0)
+            self._rss_source_failed = (
+                len(rss_data.failed_ids) + (1 if ann_used and not ann_items else 0)
+            )
 
             # 保存到存储后端
             if self.storage_manager.save_rss_data(rss_data):

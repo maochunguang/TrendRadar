@@ -652,7 +652,7 @@ def validate_config_data(data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     warnings: List[str] = []
 
     # 顶层必须是映射，且允许的段类型正确
-    for section in ["app", "schedule", "platforms", "rss", "report", "filter",
+    for section in ["app", "schedule", "platforms", "rss", "announcements", "report", "filter",
                     "ai_filter", "display", "notification", "storage", "ai",
                     "ai_analysis", "ai_translation", "advanced"]:
         if section in data and not isinstance(data[section], dict):
