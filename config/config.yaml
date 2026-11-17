@@ -156,6 +156,7 @@ rss:
     - id: "bbc-zhongwen"
       name: "BBC 中文网"
       url: "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml"
+      to_simplified: true           # BBC 简体源已 301 到繁体源，抓取后自动繁转简（需 zhconv）
 
     # 自定义源示例
     # - id: "custom-feed"

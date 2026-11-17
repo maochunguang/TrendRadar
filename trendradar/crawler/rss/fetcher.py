@@ -26,6 +26,21 @@ class RSSFeedConfig:
     max_items: int = 0          # 最大条目数（0=不限制）
     enabled: bool = True        # 是否启用
     max_age_days: Optional[int] = None  # 文章最大年龄（天），覆盖全局设置；None=使用全局，0=禁用过滤
+    to_simplified: bool = False # 繁体中文转简体（BBC 中文等繁体源）；需安装 zhconv
+
+
+# 繁→简转换库（可选依赖，缺失时 to_simplified 静默跳过并提示一次）
+try:
+    from zhconv import convert as _zh_convert
+except ImportError:
+    _zh_convert = None
+
+
+def _convert_to_simplified(text: str) -> str:
+    """繁体中文转简体（zh-cn：字形 + 大陆用词）；转换库缺失时原样返回"""
+    if not text or _zh_convert is None:
+        return text
+    return _zh_convert(text, "zh-cn")
 
 
 class RSSFetcher:
@@ -119,6 +134,18 @@ class RSSFetcher:
                         raise
 
             parsed_items = self.parser.parse(response.text, feed.url)
+
+            # 繁体源（如 BBC 中文）转简体：标题 + 摘要 + 作者
+            if feed.to_simplified:
+                if _zh_convert is None:
+                    print(f"[警告] RSS 源 '{feed.name}' 配置了 to_simplified 但未安装 zhconv（uv add zhconv），跳过转换")
+                else:
+                    for parsed in parsed_items:
+                        parsed.title = _convert_to_simplified(parsed.title)
+                        if parsed.summary:
+                            parsed.summary = _convert_to_simplified(parsed.summary)
+                        if parsed.author:
+                            parsed.author = _convert_to_simplified(parsed.author)
 
             # 限制条目数量（0=不限制）
             if feed.max_items > 0:

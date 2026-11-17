@@ -522,6 +522,7 @@ function renderFeedList() {
       <input type="text" placeholder="订阅地址 https://" value="${escapeHtml(f.url || "")}" data-k="url">
       <label class="row-check"><input type="checkbox" data-k="enabled" ${f.enabled !== false ? "checked" : ""}>启用</label>
       <input type="number" style="max-width:80px" placeholder="天数" value="${f.max_age_days ?? ""}" data-k="max_age_days" title="最大文章年龄（天，覆盖全局）">
+      <label class="row-check"><input type="checkbox" data-k="to_simplified" ${f.to_simplified ? "checked" : ""} title="繁体中文自动转简体（BBC 中文等繁体源，需 zhconv）">转简</label>
       <button class="btn small danger" data-del="${i}">删</button>
     </div>`).join("");
 
@@ -529,7 +530,14 @@ function renderFeedList() {
     inp.addEventListener(inp.type === "checkbox" ? "change" : "input", () => {
       const idx = +inp.closest(".list-item").dataset.index;
       if (inp.type === "checkbox") {
-        state.data.rss.feeds[idx].enabled = inp.checked;
+        const key = inp.dataset.k;
+        if (key === "enabled") {
+          state.data.rss.feeds[idx].enabled = inp.checked;
+        } else if (inp.checked) {
+          state.data.rss.feeds[idx][key] = true;
+        } else {
+          delete state.data.rss.feeds[idx][key];
+        }
       } else if (inp.dataset.k === "max_age_days") {
         const num = parseInt(inp.value, 10);
         if (!isNaN(num)) state.data.rss.feeds[idx].max_age_days = num;
