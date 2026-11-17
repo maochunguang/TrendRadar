@@ -444,6 +444,7 @@ class AIFilterPipeline:
                 "ranks": r.get("ranks", []),
                 "first_time": r.get("first_time", ""),
                 "last_time": r.get("last_time", ""),
+                "summary": r.get("summary", ""),
                 "count": r.get("count", 1),
                 "relevance_score": r.get("relevance_score", 0),
                 "source_type": r.get("source_type", "hotlist"),
@@ -487,6 +488,11 @@ class AIFilterPipeline:
         rss_stats = []
         rss_new_stats = []
         min_score = self._filter_config.get("MIN_SCORE", 0)
+
+        # RSS 摘要展示开关（与关键词模式共用 rss.summary 配置）
+        summary_config = self.config.get("RSS", {}).get("SUMMARY", {})
+        summary_enabled = summary_config.get("ENABLED", False)
+        summary_max_length = summary_config.get("MAX_LENGTH", 100)
 
         latest_time = None
         if mode == "current":
@@ -569,6 +575,13 @@ class AIFilterPipeline:
                     "time_display": time_display,
                     "matched_keyword": tag_name,
                 }
+
+                # RSS 摘要随条目透传（热榜条目无摘要列，summary 恒为空）
+                if summary_enabled and source_type == "rss":
+                    raw_summary = item.get("summary", "")
+                    if raw_summary:
+                        from trendradar.utils.text import clean_summary_text
+                        title_entry["summary"] = clean_summary_text(raw_summary, summary_max_length)
 
                 if source_type == "rss":
                     rss_titles.append(title_entry)

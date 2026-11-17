@@ -7,6 +7,7 @@
 """
 
 import unittest
+from unittest.mock import MagicMock
 
 from trendradar.core.loader import _load_announcements_config
 from trendradar.crawler.announcements import (
@@ -220,3 +221,66 @@ class LoaderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AIFilterSummaryTests(unittest.TestCase):
+    """AI 筛选模式下 RSS 摘要应随条目透传到报告数据"""
+
+    def _convert(self, summary_enabled):
+        from trendradar.ai.filter_pipeline import AIFilterPipeline
+        from trendradar.ai.filter import AIFilterResult
+
+        pipeline = AIFilterPipeline(
+            config={
+                "RSS": {"SUMMARY": {"ENABLED": summary_enabled, "MAX_LENGTH": 50}},
+                "AI_FILTER": {},
+            },
+            storage_manager=MagicMock(),
+            get_time_func=lambda: "2026-11-17 10:00:00",
+        )
+        result = AIFilterResult(tags=[{
+            "tag": "芯片", "description": "", "position": 1, "count": 1,
+            "items": [{
+                "title": "AI 芯片新突破",
+                "source_id": "techcrunch", "source_name": "TechCrunch",
+                "url": "https://e.com/a", "mobile_url": "", "rank": 0,
+                "ranks": [], "first_time": "", "last_time": "",
+                "summary": "<p>厂商发布新一代 &amp; 芯片</p>",
+                "count": 1, "relevance_score": 0.9,
+                "source_type": "rss",
+            }],
+        }], total_matched=1, total_processed=1, success=True)
+        return pipeline.convert_to_report_data(result, mode="daily")
+
+    def test_summary_included_when_enabled(self):
+        _, rss_stats, _ = self._convert(True)
+        entry = rss_stats[0]["titles"][0]
+        self.assertIn("summary", entry)
+        self.assertIn("厂商发布新一代 & 芯片", entry["summary"])
+        self.assertNotIn("<", entry["summary"])
+
+    def test_summary_absent_when_disabled(self):
+        _, rss_stats, _ = self._convert(False)
+        self.assertNotIn("summary", rss_stats[0]["titles"][0])
+
+    def test_hotlist_entry_no_summary(self):
+        from trendradar.ai.filter_pipeline import AIFilterPipeline
+        from trendradar.ai.filter import AIFilterResult
+
+        pipeline = AIFilterPipeline(
+            config={"RSS": {"SUMMARY": {"ENABLED": True}}, "AI_FILTER": {}},
+            storage_manager=MagicMock(),
+            get_time_func=lambda: "2026-11-17 10:00:00",
+        )
+        result = AIFilterResult(tags=[{
+            "tag": "华为", "description": "", "position": 1, "count": 1,
+            "items": [{
+                "title": "华为发布新机", "source_id": "weibo",
+                "source_name": "微博", "url": "", "mobile_url": "",
+                "rank": 1, "ranks": [1], "first_time": "", "last_time": "",
+                "summary": "", "count": 1, "relevance_score": 0.9,
+                "source_type": "hotlist",
+            }],
+        }], total_matched=1, total_processed=1, success=True)
+        hotlist_stats, _, _ = pipeline.convert_to_report_data(result, mode="daily")
+        self.assertNotIn("summary", hotlist_stats[0]["titles"][0])
