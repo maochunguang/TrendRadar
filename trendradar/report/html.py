@@ -1720,7 +1720,15 @@ def render_html_content(
                     stats_html += escaped_title
 
                 stats_html += """
-                            </div>
+                            </div>"""
+
+                # 热榜条目 AI 一句话摘要（ai_summary.enabled 时由统计层附带）
+                item_ai_summary = title_data.get("ai_summary", "")
+                if item_ai_summary:
+                    stats_html += f"""
+                            <div class="item-summary">{html_escape_text(f"🤖 {item_ai_summary}")}</div>"""
+
+                stats_html += """
                         </div>
                     </div>"""
 

@@ -377,3 +377,45 @@ class FrequencyEditorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HtmlAiSummaryRenderTests(unittest.TestCase):
+    """热榜条目的 ai_summary 应渲染到 HTML 报告（此前只有 CSS 没有渲染点）"""
+
+    def _report_data(self):
+        return {
+            "stats": [{
+                "word": "华为",
+                "count": 1,
+                "position": 1,
+                "titles": [{
+                    "title": "华为发布新机",
+                    "source_name": "微博",
+                    "url": "https://e.com/a",
+                    "mobile_url": "",
+                    "ranks": [1],
+                    "rank_threshold": 5,
+                    "count": 1,
+                    "time_display": "",
+                    "ai_summary": "华为发布搭载新芯片的旗舰机型",
+                }],
+            }],
+            "new_titles": [],
+            "total_new_count": 0,
+            "rss_matched_count": 0,
+            "failed_ids": [],
+        }
+
+    def test_ai_summary_rendered_in_hotlist(self):
+        from trendradar.report.html import render_html_content
+
+        html = render_html_content(self._report_data(), total_titles=1)
+        self.assertIn('<div class="item-summary">🤖 华为发布搭载新芯片的旗舰机型</div>', html)
+
+    def test_absent_when_no_ai_summary(self):
+        from trendradar.report.html import render_html_content
+
+        data = self._report_data()
+        del data["stats"][0]["titles"][0]["ai_summary"]
+        html = render_html_content(data, total_titles=1)
+        self.assertNotIn('<div class="item-summary">', html)
