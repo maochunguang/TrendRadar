@@ -5,6 +5,7 @@
 提供报告生成相关的通用辅助函数
 """
 
+import html
 import re
 from typing import Dict, List, Optional
 
@@ -49,7 +50,6 @@ def html_escape(text: str) -> str:
     """
     if not isinstance(text, str):
         text = str(text)
-
     return (
         text.replace("&", "&amp;")
         .replace("<", "&lt;")
@@ -57,6 +57,17 @@ def html_escape(text: str) -> str:
         .replace('"', "&quot;")
         .replace("'", "&#x27;")
     )
+
+
+def html_escape_text(text: str) -> str:
+    """纯文本转义（仅 & < >，保留引号原样）
+
+    用于摘要等已清洗为纯文本、不含属性语义的场景；
+    严格转义（含引号）会让 ' 显示为 &#x27;，产生视觉噪音。
+    """
+    if not isinstance(text, str):
+        text = str(text)
+    return html.escape(text, quote=False)
 
 
 def calculate_rank_trend(rank_timeline=None, ranks=None):

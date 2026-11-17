@@ -8,7 +8,7 @@ HTML 报告渲染模块
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Callable
 
-from trendradar.report.helpers import html_escape, calculate_rank_trend
+from trendradar.report.helpers import html_escape, html_escape_text, calculate_rank_trend
 from trendradar.utils.time import convert_time_for_display
 from trendradar.ai.formatter import render_ai_analysis_html_rich
 
@@ -1894,7 +1894,7 @@ def render_html_content(
                 item_summary = title_data.get("summary", "")
                 if item_summary:
                     rss_html += f"""
-                            <div class="rss-summary">{html_escape(f"💬 {item_summary}")}</div>"""
+                            <div class="rss-summary">{html_escape_text(f"💬 {item_summary}")}</div>"""
 
                 rss_html += """
                         </div>"""
