@@ -110,6 +110,27 @@ async def settings_page(request: Request) -> Response:
     return response
 
 
+async def latest_report_redirect(request: Request) -> Response:
+    """报告入口：重定向到 html/latest/ 下最近生成的报告
+
+    timeline 调度会按时段切换报告模式（current/daily/incremental），
+    最新报告可能落在 latest/ 下任意一个 {mode}.html；
+    固定指向 current.html 会读到上一轮旧报告，这里按修改时间取最新。
+    """
+    from starlette.responses import RedirectResponse
+
+    latest_dir = get_output_dir() / "html" / "latest"
+    candidates = []
+    if latest_dir.exists():
+        candidates = sorted(
+            (p for p in latest_dir.glob("*.html") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    target = f"/html/latest/{candidates[0].name}" if candidates else "/html/latest/current.html"
+    return RedirectResponse(url=target, status_code=307)
+
+
 async def settings_asset(request: Request) -> Response:
     """设置页面静态资源（app.js / style.css）"""
     name = request.path_params["name"]
@@ -132,6 +153,7 @@ def create_app() -> Starlette:
     routes = [
         Route("/settings", settings_page),
         Route("/settings/{name}", settings_asset),
+        Route("/report", latest_report_redirect),
         Route("/api/status", api.get_status, methods=["GET"]),
         Route("/api/config/structured", api.get_config_structured, methods=["GET"]),
         Route("/api/config/structured", api.put_config_structured, methods=["PUT"]),
