@@ -95,9 +95,10 @@ CREATE INDEX IF NOT EXISTS idx_rss_crawl_time ON rss_items(last_crawl_time);
 -- 标题索引（用于标题搜索）
 CREATE INDEX IF NOT EXISTS idx_rss_title ON rss_items(title);
 
--- URL + feed_id 唯一索引（实现去重）
+-- URL + feed_id 唯一索引（实现去重；空 URL 条目不参与判重，
+-- 如 RSSHub jin10 等 route 不提供详情链接的源）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rss_url_feed
-    ON rss_items(url, feed_id);
+    ON rss_items(url, feed_id) WHERE url != '';
 
 -- GUID + feed_id 部分唯一索引（guid 非空时优先用 guid 去重）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rss_guid_feed

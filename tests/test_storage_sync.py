@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+import unittest
 from unittest.mock import patch
 
 from mcp_server.tools.storage_sync import StorageSyncTools
@@ -54,3 +55,35 @@ class StorageSyncTests(TestCase):
             self.assertTrue(
                 (Path(project_root) / "output" / "news" / f"{today}.db").is_file()
             )
+
+
+class RssEmptyUrlStorageTests(unittest.TestCase):
+    """空 URL 条目（如 RSSHub jin10）不应因 UNIQUE(url, feed_id) 互相覆盖"""
+
+    def test_multiple_empty_url_items_stored(self):
+        import tempfile
+        from pathlib import Path
+
+        from trendradar.storage.base import RSSData, RSSItem
+        from trendradar.storage.local import LocalStorageBackend
+
+        tmp = tempfile.TemporaryDirectory()
+        storage = LocalStorageBackend(data_dir=tmp.name, enable_txt=False)
+        data = RSSData(
+            date="2026-11-18", crawl_time="21:00",
+            items={"jin10": [
+                RSSItem(title="快讯A", feed_id="jin10", url="", guid="g1",
+                        published_at="2026-11-18T21:00:00+08:00"),
+                RSSItem(title="快讯B", feed_id="jin10", url="", guid="g2",
+                        published_at="2026-11-18T21:01:00+08:00"),
+                RSSItem(title="快讯C", feed_id="jin10", url="", guid="g3",
+                        published_at="2026-11-18T21:02:00+08:00"),
+            ]},
+            id_to_name={"jin10": "金十数据"},
+        )
+        self.assertTrue(storage.save_rss_data(data))
+        latest = storage.get_rss_data("2026-11-18")
+        count = len(latest.items.get("jin10", [])) if latest else 0
+        storage.cleanup()
+        tmp.cleanup()
+        self.assertEqual(count, 3)

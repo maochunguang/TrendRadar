@@ -112,6 +112,18 @@ class SQLiteStorageMixin:
                 ON rss_items(guid, feed_id) WHERE guid != ''
             """)
 
+        # 迁移：idx_rss_url_feed 改为仅非空 URL 判重（空 URL 条目如 RSSHub jin10
+        # 不应互相冲突导致只有一条能入库）
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_rss_url_feed'"
+        ).fetchone()
+        if row and row[0] and "WHERE url != ''" not in row[0]:
+            conn.execute("DROP INDEX idx_rss_url_feed")
+            conn.execute("""
+                CREATE UNIQUE INDEX idx_rss_url_feed
+                ON rss_items(url, feed_id) WHERE url != ''
+            """)
+
     # ========================================
     # 新闻数据存储
     # ========================================
