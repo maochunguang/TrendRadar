@@ -726,6 +726,10 @@ class NewsAnalyzer:
 
         self._hotlist_total_count = total_titles
 
+        # 主区 RSS 摘要兜底：无摘要条目（如 hnrss 纯元数据描述清洗后为空）抓原文首段
+        # （与新增区/独立区兜底共用抓取器缓存与每轮 20 篇上限）
+        self._attach_fulltext_summaries(rss_items)
+
         # 跨平台同事件聚合（可选：同一事件多平台合并为一条，减少重复）
         clustering_config = self.ctx.config.get("DISPLAY", {}).get("EVENT_CLUSTERING", {})
         if clustering_config.get("ENABLED") and stats:
@@ -1056,6 +1060,63 @@ class NewsAnalyzer:
             )
         except Exception as e:
             return [], [f"抓取失败: {e}"]
+
+    def _attach_fulltext_summaries(self, rss_items: Optional[List[Dict]]) -> None:
+        """为无摘要的 RSS 统计条目抓取原文首段兜底（rss.summary.fulltext_fallback）
+
+        主区 RSS 摘要来自库中的原始 description；hnrss 等源的 description 是
+        纯元数据（Article URL/Points），清洗后为空（无 💬 可显示）。
+        这里对空摘要条目按需抓取原文首段补充，复用 FulltextFetcher 的缓存
+        与每轮 MAX_FULLTEXT_PER_RUN 篇上限。
+        """
+        if not rss_items:
+            return
+        summary_config = self.ctx.rss_config.get("SUMMARY", {})
+        if not summary_config.get("ENABLED") or not summary_config.get("FULLTEXT_FALLBACK"):
+            return
+
+        targets: List[Dict] = []
+        for stat in rss_items:
+            for title_data in stat.get("titles", []):
+                if not title_data.get("summary") and title_data.get("url"):
+                    targets.append(title_data)
+        if not targets:
+            return
+
+        # 代理仅在 USE_PROXY 开启时使用（PROXY_URL 配置了但开关关闭时直连，
+        # 否则指向未运行的代理会让所有抓取失败）
+        fetch_proxy = ""
+        if self.ctx.rss_config.get("USE_PROXY"):
+            fetch_proxy = self.ctx.rss_config.get("PROXY_URL", "") or self.proxy_url or ""
+
+        if self._fulltext_fetcher is None:
+            self._fulltext_fetcher = FulltextFetcher(
+                timeout=DEFAULT_FULLTEXT_TIMEOUT,
+                proxy_url=fetch_proxy or None,
+            )
+
+        # 主区兜底使用独立预算（raw 路径的新增区/独立区兜底可能已耗尽共享预算），
+        # 但复用 raw 抓取器已缓存的 URL 结果，避免重复抓取
+        fetcher = FulltextFetcher(
+            timeout=DEFAULT_FULLTEXT_TIMEOUT,
+            proxy_url=fetch_proxy or None,
+        )
+        fetcher._cache.update(self._fulltext_fetcher._cache)
+
+        try:
+            max_length = int(summary_config.get("MAX_LENGTH", 100))
+        except (TypeError, ValueError):
+            max_length = 100
+        if max_length < 0:
+            max_length = 0
+        fetched = 0
+        for title_data in targets:
+            summary = fetcher.get_summary(title_data["url"], max_length)
+            if summary:
+                title_data["summary"] = summary
+                fetched += 1
+        if fetched:
+            print(f"[摘要] 原文首段兜底（主区）：补充 {fetched} 条 RSS 摘要")
 
     def _crawl_rss_data(self) -> Tuple[Optional[List[Dict]], Optional[List[Dict]], Optional[List[Dict]], set]:
         """

@@ -117,8 +117,9 @@ rss:
   summary:
     enabled: true                     # 是否显示摘要（true=显示, false=隐藏）
     max_length: 0                     # 摘要最大长度（字符，0=不截断，展示源提供的全文）
-    fulltext_fallback: false          # 源未提供摘要时抓取原文提取首段（true=开启, false=关闭）
+    fulltext_fallback: true           # 源未提供摘要时抓取原文提取首段（true=开启, false=关闭）
                                       # 有网络开销，每次运行最多抓取 20 篇，超时 10 秒
+                                      # 覆盖：推送/网页主区、新增区、独立展示区（hnrss 等纯元数据源）
 
   # 文章新鲜度过滤（过滤超龄旧文章，避免重复推送）
   # 仅在推送阶段过滤，所有文章仍会存入数据库

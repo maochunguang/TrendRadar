@@ -89,10 +89,13 @@ class FulltextFetcher:
             url: 文章链接
             max_length: 摘要最大长度（字符）
         """
-        if not url or self._fetched >= MAX_PER_RUN:
+        if not url:
             return ""
+        # 缓存命中先返回（不消耗每轮预算，raw/主区两次转换复用同一结果）
         if url in self._cache:
             return self._cache[url]
+        if self._fetched >= MAX_PER_RUN:
+            return ""
 
         self._fetched += 1
         text = ""
