@@ -233,6 +233,35 @@ newsflash:
 
 
 # ===============================================================
+# 3.z GitHub 榜单（可选，复用 RSS 链路 + 独立页面）
+# ===============================================================
+# 采集 GitHub Trending 日/周/月榜与 AI 热门新星榜（各取前 top_n 条），
+# 转成 RSS 条目参与词组过滤与订阅源，同时生成独立页面
+# output/html/github.html（webadmin 下通过 /html/github.html 访问）。
+# 数据源：
+#   Trending ——直连 github.com/trending/{since}；github.com 国内网络
+#     间歇性不可达，配置 rsshub_base 后直连失败自动回退自建 RSSHub 的
+#     /github/trending/{since} 路由（如 NAS 上 http://172.17.0.1:1200）
+#   AI 新星 ——api.github.com Search API，按 ai_topics 各搜近 ai_days 天
+#     新建仓库按星数排序合并；GitHub token 可用环境变量 GITHUB_TOKEN
+#     提升 API 限流额度（不配置也能用，每话题每轮 1 次查询）
+# ===============================================================
+github:
+  enabled: true                       # 是否启用 GitHub 榜单采集（true=启用, false=关闭）
+  top_n: 10                           # 每个榜单取前 N 条（1-25，默认 10）
+  periods:                            # 趋势榜周期（可裁剪）
+    - daily
+    - weekly
+    - monthly
+  ai_topics:                          # AI 新星榜话题（每话题一次 API 查询，勿贪多）
+    - ai
+    - llm
+    - agent
+  ai_days: 30                         # AI 新星回看天数（搜该天数内新建的仓库，1-90）
+  rsshub_base: ""                     # RSSHub 地址（trending 回退通道，本地留空；NAS 填 http://172.17.0.1:1200）
+
+
+# ===============================================================
 # 4. 报告模式
 # ===============================================================
 report:

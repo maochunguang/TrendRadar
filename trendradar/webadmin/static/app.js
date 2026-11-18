@@ -438,6 +438,11 @@ function renderSources() {
       <p class="card-hint">拉取同花顺 7×24 实时财经快讯（每条自带正文摘要），转成 RSS 条目参与词组过滤；需保持 RSS 抓取开启。想看全部快讯可在「报告与筛选」的独立展示区加入 newsflash</p>
       <div id="flashFields"></div>
     </div>
+    <div class="card">
+      <h2>GitHub 榜单</h2>
+      <p class="card-hint">抓取 GitHub Trending 日/周/月榜 + AI 热门新星（api.github.com 按话题搜近 N 天新建仓库），转成 RSS 条目参与词组过滤，并生成独立页面 /html/github.html（主报告头部有入口）。github.com 国内间歇性不可达，配置了 RSSHub 地址会自动回退走 RSSHub 的 /github/trending 路由</p>
+      <div id="ghFields"></div>
+    </div>
     ${saveBar()}`;
 
   // 标量字段
@@ -461,11 +466,18 @@ function renderSources() {
     { path: "announcements.categories", label: "巨潮公告分类代码（仅巨潮生效）", type: "csvlist", hint: "示例：category_ndbg_szsh（年报）；留空 = 全部分类" },
     { path: "newsflash.enabled", label: "启用同花顺快讯", type: "bool", hint: "7×24 实时财经快讯，带正文摘要" },
     { path: "newsflash.max_items", label: "快讯每次最多采集条数", type: "number", hint: "0 = 不采集，上限 100" },
+    { path: "github.enabled", label: "启用 GitHub 榜单", type: "bool", hint: "Trending 日/周/月榜 + AI 新星榜，走词组过滤并生成独立页面" },
+    { path: "github.top_n", label: "每个榜单条数", type: "number", hint: "1-25，默认 10" },
+    { path: "github.periods", label: "趋势榜周期", type: "csvlist", hint: "可选 daily, weekly, monthly" },
+    { path: "github.ai_topics", label: "AI 新星话题", type: "csvlist", hint: "GitHub topic 列表，如 ai, llm, agent；每话题一次 API 查询" },
+    { path: "github.ai_days", label: "AI 新星回看天数", type: "number", hint: "搜索该天数内新建的仓库，1-90，默认 30" },
+    { path: "github.rsshub_base", label: "RSSHub 地址（回退通道）", type: "string", hint: "如 http://172.17.0.1:1200；trending 直连失败时自动走 RSSHub" },
   ];
   $("platformFields").innerHTML = renderField(scalars[0]) + renderField(scalars[1]);
   $("rssFields").innerHTML = scalars.slice(2, 8).map(renderField).join("");
   $("annFields").innerHTML = scalars.slice(8, 13).map(renderField).join("");
-  $("flashFields").innerHTML = scalars.slice(13).map(renderField).join("");
+  $("flashFields").innerHTML = scalars.slice(13, 15).map(renderField).join("");
+  $("ghFields").innerHTML = scalars.slice(15).map(renderField).join("");
   bindFieldEvents(container);
 
   renderSourceList();

@@ -16,3 +16,4 @@ output/index.html
 output/news/*.db
 output/rss/*.db
 output/txt/
+output/trendradar.db

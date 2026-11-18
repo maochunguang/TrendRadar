@@ -1083,6 +1083,48 @@ class NewsAnalyzer:
         except Exception as e:
             return [], [f"抓取失败: {e}"]
 
+    def _crawl_github_items(
+        self, timeout: int, proxy_url: str
+    ) -> Tuple[Dict[str, List], Dict[str, List[dict]], List[str]]:
+        """
+        拉取 GitHub 榜单：Trending 日/周/月 + AI 新星（config.github.enabled 控制）
+
+        Returns:
+            (按 feed_id 分组的 RSSItem 列表, 按榜单分组的页面数据, 错误列表)；
+            未启用返回空三元组
+        """
+        gh_config = self.ctx.config.get("GITHUB", {})
+        if not gh_config.get("ENABLED"):
+            return {}, {}, []
+        try:
+            from trendradar.crawler.github_trending import fetch_github
+
+            return fetch_github(
+                gh_config,
+                timezone=self.ctx.config.get("TIMEZONE", DEFAULT_TIMEZONE),
+                timeout=timeout,
+                proxy_url=proxy_url,
+            )
+        except Exception as e:
+            return {}, {}, [f"抓取失败: {e}"]
+
+    def _write_github_page(self, page_data: Dict[str, List[dict]]) -> None:
+        """生成独立 GitHub 页面（output/html/github.html，经 webadmin /html/github.html 访问）"""
+        if not page_data:
+            return
+        try:
+            from trendradar.report.github_page import generate_github_page
+
+            path = generate_github_page(
+                page_data,
+                output_dir="output",
+                timezone=self.ctx.config.get("TIMEZONE", DEFAULT_TIMEZONE),
+            )
+            if path:
+                print(f"[GitHub] 页面已生成: {path}")
+        except Exception as e:
+            print(f"[GitHub] 页面生成失败: {e}")
+
     def _attach_fulltext_summaries(self, rss_items: Optional[List[Dict]]) -> None:
         """为无摘要的 RSS 统计条目抓取原文首段兜底（rss.summary.fulltext_fallback）
 
@@ -1250,11 +1292,35 @@ class NewsAnalyzer:
                 rss_data.id_to_name["newsflash"] = flash_items[0].feed_name
                 print(f"[快讯] 获取 {len(flash_items)} 条快讯")
 
-            self._rss_source_total = len(feeds) + (1 if ann_used else 0) + (1 if flash_used else 0)
+            # GitHub 榜单（Trending 日/周/月 + AI 新星）：转换为 RSS 条目并入同一数据集，
+            # 每个榜单一个 feed_id（github-daily/weekly/monthly/ai），复用词组过滤/存储/订阅源链路；
+            # 同时生成独立 GitHub 页面（output/html/github.html），失败不影响 RSS 主流程
+            gh_by_feed, gh_page, gh_errors = self._crawl_github_items(
+                timeout=rss_config.get("TIMEOUT", 15),
+                proxy_url=rss_proxy_url if rss_config.get("USE_PROXY", False) else "",
+            )
+            for err in gh_errors:
+                print(f"[GitHub] {err}")
+            gh_used = bool(gh_by_feed or gh_errors)
+            if gh_by_feed:
+                for feed_id, gh_items in gh_by_feed.items():
+                    rss_data.items[feed_id] = gh_items
+                    rss_data.id_to_name[feed_id] = gh_items[0].feed_name
+                gh_total = sum(len(v) for v in gh_by_feed.values())
+                print(f"[GitHub] 获取 {gh_total} 条榜单数据")
+                self._write_github_page(gh_page)
+
+            self._rss_source_total = (
+                len(feeds)
+                + (1 if ann_used else 0)
+                + (1 if flash_used else 0)
+                + (1 if gh_used else 0)
+            )
             self._rss_source_failed = (
                 len(rss_data.failed_ids)
                 + (1 if ann_used and not ann_items else 0)
                 + (1 if flash_used and not flash_items else 0)
+                + (1 if gh_used and not gh_by_feed else 0)
             )
 
             # 保存到存储后端

@@ -297,6 +297,59 @@ def _load_newsflash_config(config_data: Dict) -> Dict:
     }
 
 
+def _load_github_config(config_data: Dict) -> Dict:
+    """加载 GitHub 榜单采集配置（复用 RSS 链路 + 独立 GitHub 页面）"""
+    gh = config_data.get("github", {}) or {}
+    advanced = config_data.get("advanced", {})
+    advanced_rss = advanced.get("rss", {})
+
+    try:
+        top_n = int(gh.get("top_n", 10))
+    except (ValueError, TypeError):
+        print(f"[警告] github.top_n 格式错误 ({gh.get('top_n')})，使用默认值 10")
+        top_n = 10
+    top_n = max(1, min(top_n, 25))
+
+    # 榜单周期：过滤非法值，保持配置顺序
+    valid_periods = {"daily", "weekly", "monthly"}
+    periods = []
+    for period in gh.get("periods", ["daily", "weekly", "monthly"]) or []:
+        period = str(period).strip().lower()
+        if period in valid_periods and period not in periods:
+            periods.append(period)
+    if not periods:
+        periods = ["daily", "weekly", "monthly"]
+
+    # AI 话题列表：清洗空值，去重
+    ai_topics = []
+    for topic in gh.get("ai_topics", ["ai", "llm", "agent"]) or []:
+        if topic is None:
+            continue
+        topic = str(topic).strip().lower()
+        if topic and topic not in ai_topics:
+            ai_topics.append(topic)
+
+    try:
+        ai_days = int(gh.get("ai_days", 30))
+    except (ValueError, TypeError):
+        ai_days = 30
+    ai_days = max(1, min(ai_days, 90))
+
+    return {
+        "ENABLED": gh.get("enabled", False),
+        "TOP_N": top_n,
+        "PERIODS": periods,
+        "AI_TOPICS": ai_topics,
+        "AI_DAYS": ai_days,
+        "RSSHUB_BASE": str(gh.get("rsshub_base", "") or "").strip().rstrip("/"),
+        # GitHub token 为可选密钥，仅从环境变量读取（提升 Search API 限流额度）
+        "TOKEN": os.environ.get("GITHUB_TOKEN", ""),
+        "TIMEOUT": advanced_rss.get("timeout", 15),
+        "USE_PROXY": advanced_rss.get("use_proxy", False),
+        "PROXY_URL": advanced_rss.get("proxy_url", ""),
+    }
+
+
 def _load_display_config(config_data: Dict) -> Dict:
     """加载推送内容显示配置"""
     display = config_data.get("display", {})
@@ -711,6 +764,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     # 同花顺 7×24 快讯配置（复用 RSS 链路）
     config["NEWSFLASH"] = _load_newsflash_config(config_data)
+
+    # GitHub 榜单配置（复用 RSS 链路 + 独立页面）
+    config["GITHUB"] = _load_github_config(config_data)
 
     # AI 模型共享配置
     config["AI"] = _load_ai_config(config_data)
