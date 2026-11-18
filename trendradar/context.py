@@ -322,6 +322,8 @@ class AppContext:
         report_metadata: Optional[Dict] = None,
         translate_report_func: Optional[Any] = None,
         github_page_data: Optional[Dict] = None,
+        all_hotlist_data: Optional[Dict] = None,
+        raw_rss_items: Optional[List[Dict]] = None,
     ) -> str:
         """生成HTML报告"""
         return generate_html_report(
@@ -340,6 +342,8 @@ class AppContext:
             report_metadata=report_metadata,
             translate_report_func=translate_report_func,
             github_page_data=github_page_data,
+            all_hotlist_data=all_hotlist_data,
+            raw_rss_items=raw_rss_items,
         )
 
     def render_html(
@@ -353,6 +357,9 @@ class AppContext:
         ai_analysis: Optional[Any] = None,
         standalone_data: Optional[Dict] = None,
         github_page_data: Optional[Dict] = None,
+        all_hotlist_data: Optional[Dict] = None,
+        raw_rss_items: Optional[List[Dict]] = None,
+        id_to_name: Optional[Dict] = None,
     ) -> str:
         """渲染HTML内容"""
         return render_html_content(
@@ -369,6 +376,9 @@ class AppContext:
             show_new_section=self.show_new_section,
             standalone_data=standalone_data,
             github_page_data=github_page_data,
+            all_hotlist_data=all_hotlist_data,
+            raw_rss_items=raw_rss_items,
+            id_to_name=id_to_name,
         )
 
     # === 通知内容渲染 ===

@@ -159,6 +159,8 @@ def generate_html_report(
     report_metadata: Optional[Dict] = None,
     translate_report_func: Optional[Callable] = None,
     github_page_data: Optional[Dict] = None,
+    all_hotlist_data: Optional[Dict] = None,
+    raw_rss_items: Optional[List] = None,
 ) -> str:
     """
     生成 HTML 报告
@@ -222,6 +224,9 @@ def generate_html_report(
         html_content = render_html_func(
             report_data, total_titles, mode, update_info,
             github_page_data=github_page_data,
+            all_hotlist_data=all_hotlist_data,
+            raw_rss_items=raw_rss_items,
+            id_to_name=id_to_name,
         )
     else:
         # 默认简单 HTML

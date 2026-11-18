@@ -688,6 +688,9 @@ class NewsAnalyzer:
     ) -> Tuple[List[Dict], Optional[str], Optional[AIAnalysisResult], Optional[List[Dict]], Optional[Dict], Optional[List[Dict]]]:
         """统一的分析流水线：数据处理 → 统计计算（关键词/AI筛选）→ AI分析 → HTML生成"""
 
+        # 全量热榜数据（其他新闻 tab 的数据源：全量 - 词组/AI 命中 - AI 相关）
+        self._all_hotlist_data = data_source or {}
+
         # 根据筛选策略选择数据处理方式
         if self.filter_method == "ai":
             # === AI 筛选策略 ===
@@ -829,6 +832,8 @@ class NewsAnalyzer:
                 },
                 translate_report_func=translate_report_func,
                 github_page_data=getattr(self, "_github_page_data", None),
+                all_hotlist_data=getattr(self, "_all_hotlist_data", None),
+                raw_rss_items=getattr(self, "_raw_rss_items", None),
             )
 
         return stats, html_file, ai_result, rss_items, standalone_data, rss_new_items
@@ -1905,6 +1910,7 @@ class NewsAnalyzer:
 
             # 抓取 RSS 数据（如果启用），返回统计条目、新增条目和原始条目
             rss_items, rss_new_items, raw_rss_items, rss_new_urls = self._crawl_rss_data()
+            self._raw_rss_items = raw_rss_items  # 其他新闻 tab 的 RSS 数据源（全量原文）
 
             # 执行模式策略，传递 RSS 数据用于合并推送
             self._execute_mode_strategy(

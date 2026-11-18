@@ -506,12 +506,60 @@ class TopTabTests(unittest.TestCase):
         from trendradar.report.html import render_html_content
 
         html = render_html_content(self._report_data(), total_titles=1)
+        self.assertIn("switchTopTab('top-tab-others')", html)
         self.assertIn("switchTopTab('top-tab-finance')", html)
         self.assertIn("switchTopTab('top-tab-github')", html)
         self.assertIn("switchTopTab('top-tab-ai')", html)
+        self.assertIn('id="top-tab-others"', html)
         self.assertIn('id="top-tab-finance"', html)
         self.assertIn('id="top-tab-github"', html)
         self.assertIn('id="top-tab-ai"', html)
+
+    def test_others_is_default_tab(self):
+        from trendradar.report.html import render_html_content
+
+        html = render_html_content(self._report_data(), total_titles=1)
+        self.assertIn('id="top-tab-others" class="top-tab-panel top-tab-active"', html)
+        self.assertIn('id="top-tab-finance" class="top-tab-panel"', html)
+
+    def test_others_panel_filters_matched_and_ai(self):
+        from trendradar.report.html import render_html_content
+
+        data = self._report_data()  # 热榜命中："华为发布新机"
+        all_hotlist = {
+            "weibo": {
+                "华为发布新机": {"ranks": [1], "url": "https://e.com/a", "mobileUrl": ""},
+                "某明星官宣结婚": {"ranks": [2], "url": "https://e.com/b", "mobileUrl": ""},
+                "DeepSeek 发布新模型": {"ranks": [3], "url": "https://e.com/c", "mobileUrl": ""},
+            },
+        }
+        html = render_html_content(
+            data, total_titles=3, all_hotlist_data=all_hotlist,
+        )
+        self.assertIn("某明星官宣结婚", html)
+        self.assertNotIn("华为发布新机", html.split('id="top-tab-others"')[1].split('id="top-tab-finance"')[0])
+        self.assertNotIn("DeepSeek 发布新模型", html.split('id="top-tab-others"')[1].split('id="top-tab-finance"')[0])
+
+    def test_others_panel_includes_raw_rss(self):
+        from trendradar.report.html import render_html_content
+
+        raw_rss = [{"title": "未命中词组的一条 RSS", "url": "https://r.com/x",
+                    "feed_id": "hacker-news", "summary": ""}]
+        html = render_html_content(
+            self._report_data(), total_titles=1, raw_rss_items=raw_rss,
+        )
+        self.assertIn("未命中词组的一条 RSS", html)
+        self.assertIn("未命中词组的 RSS", html)
+
+    def test_others_panel_empty_state(self):
+        from trendradar.report.html import render_html_content
+
+        # 全量只有已命中的那条 → 无其他新闻
+        all_hotlist = {"weibo": {"华为发布新机": {"ranks": [1], "url": "", "mobileUrl": ""}}}
+        html = render_html_content(
+            self._report_data(), total_titles=1, all_hotlist_data=all_hotlist,
+        )
+        self.assertIn("本轮没有其他新闻", html)
 
     def test_github_panel_embedded(self):
         from trendradar.report.html import render_html_content

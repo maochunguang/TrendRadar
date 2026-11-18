@@ -150,6 +150,125 @@ def _render_ai_news_panel(
     return panel
 
 
+# 「其他新闻」tab 的展示上限（避免全量条目把页面撑得过大）
+_OTHER_NEWS_PER_PLATFORM_LIMIT = 20
+_OTHER_NEWS_RSS_LIMIT = 50
+
+
+def _render_other_news_panel(
+    report_data: Dict,
+    all_hotlist_data: Optional[Dict],
+    rss_items: Optional[List[Dict]] = None,
+    rss_new_items: Optional[List[Dict]] = None,
+    raw_rss_items: Optional[List[Dict]] = None,
+    id_to_name: Optional[Dict] = None,
+) -> str:
+    """渲染「其他新闻」tab（默认 tab）
+
+    内容 = 全部新闻中不属于财经新闻 tab（词组/AI 筛选未命中）且不匹配
+    AI 关键词的条目。热榜按平台分组取前 N 条，RSS 取未展示条目中的前 M 条；
+    复用 RSS 区条目样式。
+    """
+    # 财经 tab 已展示的标题与 URL（热榜 + RSS 命中）
+    matched_titles = set()
+    shown_urls = set()
+    for stat in (report_data.get("stats") or []):
+        for title_data in stat.get("titles") or []:
+            matched_titles.add(title_data.get("title", ""))
+            url = title_data.get("mobile_url") or title_data.get("url", "")
+            if url:
+                shown_urls.add(url)
+    for stat in list(rss_items or []) + list(rss_new_items or []):
+        for title_data in stat.get("titles") or []:
+            matched_titles.add(title_data.get("title", ""))
+            url = title_data.get("url", "")
+            if url:
+                shown_urls.add(url)
+
+    # 热榜：全量 - 已命中 - AI 相关（AI 相关在 AI 新闻 tab 展示），每平台取前 N 条
+    hot_groups = []
+    hot_total = 0
+    for platform_id, titles_dict in (all_hotlist_data or {}).items():
+        entries = []
+        for title, info in (titles_dict or {}).items():
+            if not title or title in matched_titles:
+                continue
+            if is_ai_related(title):
+                continue
+            url = (info or {}).get("mobileUrl") or (info or {}).get("url") or ""
+            entries.append({"title": title, "url": url, "info": info or {}})
+        hot_total += len(entries)
+        entries = entries[:_OTHER_NEWS_PER_PLATFORM_LIMIT]
+        if entries:
+            hot_groups.append((platform_id, entries))
+
+    # RSS：原文全量 - 已展示 - AI 相关，取前 M 条
+    rss_entries = []
+    seen_keys = set()
+    for item in raw_rss_items or []:
+        title = item.get("title", "")
+        url = item.get("url", "")
+        if not title or title in matched_titles:
+            continue
+        if is_ai_related(title):
+            continue
+        key = url or title
+        if key in seen_keys:
+            continue
+        if url and url in shown_urls:
+            continue
+        seen_keys.add(key)
+        rss_entries.append(item)
+    rss_entries = rss_entries[:_OTHER_NEWS_RSS_LIMIT]
+
+    if not hot_groups and not rss_entries:
+        return ('<div class="ai-tab-empty">本轮没有其他新闻'
+                '（全部新闻已被财经词组命中或属于 AI 相关）</div>')
+
+    def render_item(item: Dict) -> str:
+        title = item.get("title", "")
+        url = item.get("url", "")
+        info = item.get("info") or {}
+        ranks = info.get("ranks") or []
+        rank_html = ""
+        if ranks:
+            try:
+                rank_html = f'<span class="rss-author">排名 {min(int(r) for r in ranks if str(r).isdigit() or isinstance(r, int))}</span>'
+            except (ValueError, TypeError):
+                rank_html = ""
+        escaped_title = html_escape(title)
+        title_html = (
+            f'<a href="{html_escape(url)}" target="_blank" rel="noopener noreferrer" '
+            f'class="rss-link">{escaped_title}</a>'
+            if url else escaped_title
+        )
+        return f"""<div class="rss-item">
+                            <div class="rss-meta">{rank_html}</div>
+                            <div class="rss-title">{title_html}</div>
+                        </div>"""
+
+    panel = '<div class="rss-section">'
+    for platform_id, entries in hot_groups:
+        platform_name = (id_to_name or {}).get(platform_id, str(platform_id))
+        items_html = "".join(render_item(e) for e in entries)
+        panel += f"""<div class="feed-group">
+                    <div class="feed-header">
+                        <div class="feed-name">{html_escape(platform_name)}</div>
+                        <div class="feed-count">{len(entries)} 条</div>
+                    </div>{items_html}
+                </div>"""
+    if rss_entries:
+        items_html = "".join(render_item(e) for e in rss_entries)
+        panel += f"""<div class="feed-group">
+                    <div class="feed-header">
+                        <div class="feed-name">📡 未命中词组的 RSS</div>
+                        <div class="feed-count">{len(rss_entries)} 条</div>
+                    </div>{items_html}
+                </div>"""
+    panel += "</div>"
+    return panel
+
+
 def render_html_content(
     report_data: Dict,
     total_titles: int,
@@ -165,6 +284,9 @@ def render_html_content(
     ai_analysis: Optional[Any] = None,
     show_new_section: bool = True,
     github_page_data: Optional[Dict[str, List[dict]]] = None,
+    all_hotlist_data: Optional[Dict] = None,
+    raw_rss_items: Optional[List[Dict]] = None,
+    id_to_name: Optional[Dict] = None,
 ) -> str:
     """渲染HTML内容
 
@@ -182,6 +304,9 @@ def render_html_content(
         ai_analysis: AI 分析结果对象（可选），AIAnalysisResult 实例
         show_new_section: 是否显示新增热点区域
         github_page_data: GitHub 榜单页面数据（可选），{feed_id: [结构化条目]}
+        all_hotlist_data: 热榜全量数据（可选），{platform_id: {title: {ranks, url, mobileUrl}}}，
+            用于「其他新闻」tab（全量 - 命中 - AI 相关）
+        raw_rss_items: 原始 RSS 条目列表（可选），用于「其他新闻」tab 的 RSS 部分
 
     Returns:
         渲染后的 HTML 字符串
@@ -1740,15 +1865,24 @@ def render_html_content(
             </div>
 
             <div class="content">
-                <div class="top-tab-bar">
-                    <button type="button" class="top-tab-btn top-tab-active" onclick="switchTopTab('top-tab-finance')">📰 财经新闻</button>
-                    <button type="button" class="top-tab-btn" onclick="switchTopTab('top-tab-github')">🐙 GitHub</button>
-                    <button type="button" class="top-tab-btn" onclick="switchTopTab('top-tab-ai')">🤖 AI 新闻</button>
-                </div>
-                <div id="top-tab-finance" class="top-tab-panel top-tab-active">
                 <div class="search-bar">
                     <input type="text" class="search-input" placeholder="搜索新闻标题..." oninput="handleSearch(this.value)">
+                </div>
+                <div class="top-tab-bar">
+                    <button type="button" class="top-tab-btn top-tab-active" onclick="switchTopTab('top-tab-others')">🗞️ 其他新闻</button>
+                    <button type="button" class="top-tab-btn" onclick="switchTopTab('top-tab-finance')">📰 财经新闻</button>
+                    <button type="button" class="top-tab-btn" onclick="switchTopTab('top-tab-ai')">🤖 AI 新闻</button>
+                    <button type="button" class="top-tab-btn" onclick="switchTopTab('top-tab-github')">🐙 GitHub</button>
                 </div>"""
+
+    # 其他新闻 tab（默认）：全部新闻 - 财经词组命中 - AI 相关
+    other_panel_html = _render_other_news_panel(
+        report_data, all_hotlist_data, rss_items, rss_new_items, raw_rss_items,
+        id_to_name=id_to_name,
+    )
+    html += f"""
+                <div id="top-tab-others" class="top-tab-panel top-tab-active">{other_panel_html}</div>
+                <div id="top-tab-finance" class="top-tab-panel">"""
 
     # 处理失败ID错误信息
     if report_data["failed_ids"]:
@@ -2654,7 +2788,7 @@ def render_html_content(
             }
 
             // 摘要展开/收起：仅对实际被截断（溢出）的摘要启用点击交互
-            // 顶部 tab 切换（财经新闻 / GitHub / AI 新闻）
+            // 顶部 tab 切换（其他新闻 / 财经新闻 / AI 新闻 / GitHub）
             function switchTopTab(tabId) {
                 document.querySelectorAll('.top-tab-panel').forEach(function(p) {
                     p.classList.remove('top-tab-active');
@@ -2664,7 +2798,7 @@ def render_html_content(
                 });
                 var panel = document.getElementById(tabId);
                 if (panel) panel.classList.add('top-tab-active');
-                var order = ['top-tab-finance', 'top-tab-github', 'top-tab-ai'];
+                var order = ['top-tab-others', 'top-tab-finance', 'top-tab-ai', 'top-tab-github'];
                 var idx = order.indexOf(tabId);
                 var btns = document.querySelectorAll('.top-tab-btn');
                 if (idx >= 0 && btns[idx]) btns[idx].classList.add('top-tab-active');
@@ -2674,7 +2808,7 @@ def render_html_content(
             function initTopTabRestore() {
                 try {
                     var saved = localStorage.getItem('trendradar-top-tab');
-                    if (saved && saved !== 'top-tab-finance' && document.getElementById(saved)) {
+                    if (saved && saved !== 'top-tab-others' && document.getElementById(saved)) {
                         switchTopTab(saved);
                     }
                 } catch(e) {}
