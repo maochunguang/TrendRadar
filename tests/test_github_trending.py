@@ -266,8 +266,8 @@ class FetchGithubTests(unittest.TestCase):
         items, page, errors = fetch_github(self._config(ENABLED=False), timeout=1)
         self.assertEqual((items, page, errors), ({}, {}, []))
 
-    def test_all_sources_fail_reports_errors(self):
-        """直连 + 回退全部失败时返回错误信息且不抛异常"""
+    def test_all_channels_fail_reports_errors(self):
+        """直连 + RSSHub + Search API 全部失败时返回错误信息且不抛异常"""
         import unittest.mock as mock
 
         with mock.patch("trendradar.crawler.github_trending.requests.get",
@@ -277,6 +277,30 @@ class FetchGithubTests(unittest.TestCase):
         self.assertEqual(page, {})
         self.assertTrue(errors)
         self.assertIn("Trending daily", errors[0])
+        self.assertIn("全部通道失败", errors[0])
+
+    def test_fallback_to_search_when_trending_unreachable(self):
+        """官方 trending 不可达时自动降级为 Search API 近似榜"""
+        import unittest.mock as mock
+
+        api_resp = mock.Mock(status_code=200, json=mock.Mock(return_value=SEARCH_PAYLOAD))
+        api_resp.raise_for_status = mock.Mock()
+
+        def fake_get(url, **kwargs):
+            if "api.github.com" in url:
+                return api_resp
+            raise Exception("connection timed out")
+
+        with mock.patch("trendradar.crawler.github_trending.requests.get",
+                        side_effect=fake_get):
+            items, page, errors = fetch_github(
+                self._config(RSSHUB_BASE="http://172.17.0.1:1200"), timeout=1,
+            )
+
+        self.assertIn("github-daily", items)
+        self.assertEqual(len(items["github-daily"]), 2)
+        self.assertEqual(page["github-daily"][0]["source"], "search")
+        self.assertTrue(any("已降级" in e for e in errors))
 
     def test_success_builds_items_and_page(self):
         import unittest.mock as mock

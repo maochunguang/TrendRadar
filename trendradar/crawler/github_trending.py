@@ -104,7 +104,7 @@ def fetch_github(
         feed_id, feed_name, _ = TRENDING_FEEDS.get(period, (f"github-{period}", f"GitHub {period}", period))
         try:
             repos, err = _fetch_trending_period(
-                period, top_n, rsshub_base, timeout, proxy_url,
+                period, top_n, rsshub_base, str(gh_config.get("TOKEN") or ""), timeout, proxy_url,
             )
         except Exception as e:
             repos, err = [], f"{feed_name}抓取失败: {e}"
@@ -149,17 +149,23 @@ def fetch_github(
     return items_by_feed, page_data, errors
 
 
+# 第三级降级：官方 trending 不可达（github.com 被墙）时，
+# 用 Search API "近 N 天新建仓库按星数" 近似对应周期
+TRENDING_FALLBACK_DAYS = {"daily": 1, "weekly": 7, "monthly": 30}
+
+
 def _fetch_trending_period(
     period: str,
     top_n: int,
     rsshub_base: str,
+    token: str,
     timeout: int,
     proxy_url: str,
 ) -> Tuple[List[dict], Optional[str]]:
-    """抓取单个周期的 Trending 榜：直连失败时回退 RSSHub"""
+    """抓取单个周期的 Trending 榜：直连 → RSSHub 回退 → Search API 近似降级"""
     proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
 
-    # 直连（github.com 国内间歇性不可达，重试一次）
+    # 一级：直连（github.com 国内网络下经常不可达，重试一次）
     last_err = ""
     for attempt in range(2):
         if attempt:
@@ -175,12 +181,14 @@ def _fetch_trending_period(
             resp.raise_for_status()
             repos = _parse_trending_html(resp.text, top_n)
             if repos:
+                for repo in repos:
+                    repo["source"] = "trending"
                 return repos, None
             last_err = "页面未解析出条目（页面结构可能变化）"
         except Exception as e:
             last_err = str(e)
 
-    # 回退自建 RSSHub（若配置）；路由本身也依赖 RSSHub 服务端能访问 github.com
+    # 二级：回退自建 RSSHub（路由本身也依赖 RSSHub 服务端能访问 github.com）
     if rsshub_base:
         try:
             resp = requests.get(
@@ -192,12 +200,44 @@ def _fetch_trending_period(
             resp.raise_for_status()
             repos = _parse_rsshub_text(resp.text, top_n)
             if repos:
+                for repo in repos:
+                    repo["source"] = "rsshub"
                 return repos, None
-            return [], f"Trending {period} 直连与 RSSHub 均未解析出条目"
+            rsshub_err = "RSSHub 未解析出条目"
         except Exception as e:
-            return [], f"Trending {period} 直连失败（{last_err}），RSSHub 回退失败: {e}"
+            rsshub_err = str(e)
+    else:
+        rsshub_err = "未配置 RSSHub"
 
-    return [], f"Trending {period} 直连失败: {last_err}"
+    # 三级：Search API 近似榜（api.github.com 可达性远好于网页端）
+    days = TRENDING_FALLBACK_DAYS.get(period, 7)
+    try:
+        repos, search_err = _fetch_search_new_repos(
+            days=days, top_n=top_n, token=token, timeout=timeout, proxy_url=proxy_url,
+        )
+        if repos:
+            for repo in repos:
+                repo["source"] = "search"
+            return repos, (
+                f"Trending {period} 官方榜不可达（直连: {last_err}；RSSHub: {rsshub_err}），"
+                f"已降级为 Search API 近似榜（近 {days} 天新建仓库按星数）"
+            )
+        return [], f"Trending {period} 全部通道失败（直连: {last_err}；RSSHub: {rsshub_err}；Search: {search_err}）"
+    except Exception as e:
+        return [], f"Trending {period} 全部通道失败（直连: {last_err}；RSSHub: {rsshub_err}；Search: {e}）"
+
+
+def _fetch_search_new_repos(
+    days: int,
+    top_n: int,
+    token: str,
+    timeout: int,
+    proxy_url: str,
+) -> Tuple[List[dict], Optional[str]]:
+    """Search API 新建仓库榜：created:>N 天前 按星数排序（trending 降级通道）"""
+    cutoff = (datetime.now(tz=dt_timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    query = f"created:>{cutoff} stars:>0"
+    return _search_repos(query, top_n, token, timeout, proxy_url)
 
 
 def _fetch_ai_repos(
@@ -209,31 +249,16 @@ def _fetch_ai_repos(
     proxy_url: str,
 ) -> Tuple[List[dict], Optional[str]]:
     """按话题搜近 N 天新建仓库（每话题一次查询），合并去重按星数取 Top N"""
-    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
     cutoff = (datetime.now(tz=dt_timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-
-    headers = dict(_API_HEADERS)
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
 
     per_topic: List[List[dict]] = []
     failed_topics: List[str] = []
     for topic in topics:
         try:
-            resp = requests.get(
-                SEARCH_API_URL,
-                params={
-                    "q": f"topic:{topic} created:>{cutoff}",
-                    "sort": "stars",
-                    "order": "desc",
-                    "per_page": min(top_n, 100),
-                },
-                timeout=timeout,
-                headers=headers,
-                proxies=proxies,
+            repos, _ = _search_repos(
+                f"topic:{topic} created:>{cutoff}", top_n, token, timeout, proxy_url,
             )
-            resp.raise_for_status()
-            per_topic.append(_parse_search_payload(resp.json(), top_n))
+            per_topic.append(repos)
         except Exception as e:
             failed_topics.append(f"{topic}: {e}")
 
@@ -246,6 +271,36 @@ def _fetch_ai_repos(
 
     err = "; ".join(failed_topics) if failed_topics else None
     return repos, err
+
+
+def _search_repos(
+    query: str,
+    top_n: int,
+    token: str,
+    timeout: int,
+    proxy_url: str,
+) -> Tuple[List[dict], Optional[str]]:
+    """调用 GitHub Search API（repositories），返回解析后的仓库列表"""
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+
+    headers = dict(_API_HEADERS)
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    resp = requests.get(
+        SEARCH_API_URL,
+        params={
+            "q": query,
+            "sort": "stars",
+            "order": "desc",
+            "per_page": min(top_n, 100),
+        },
+        timeout=timeout,
+        headers=headers,
+        proxies=proxies,
+    )
+    resp.raise_for_status()
+    return _parse_search_payload(resp.json(), top_n), None
 
 
 def _parse_trending_html(html: str, top_n: int) -> List[dict]:
@@ -390,6 +445,7 @@ def _page_entry(repo: dict, rank: int) -> dict:
         "stars": repo.get("stars", 0),
         "period_stars": repo.get("period_stars", 0),
         "topics": repo.get("topics", []),
+        "source": repo.get("source", "trending"),
         "url": repo.get("url") or f"https://github.com/{repo['repo']}",
     }
 

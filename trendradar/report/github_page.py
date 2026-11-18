@@ -15,13 +15,27 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-# 区块元数据：feed_id → (标题, 副标题说明)
+# 区块元数据：feed_id → (标题, 默认副标题说明)
 SECTIONS = {
     "github-daily": ("📅 GitHub 日榜", "今日新增星数 Top 10"),
     "github-weekly": ("🗓️ GitHub 周榜", "本周新增星数 Top 10"),
     "github-monthly": ("📆 GitHub 月榜", "本月新增星数 Top 10"),
     "github-ai": ("🤖 AI 热门新星", "GitHub AI 话题 · 近期新建仓库按星数"),
 }
+
+# 降级来源的副标题（官方 trending 不可达时用 Search API 近似）
+_FALLBACK_DAYS = {"github-daily": 1, "github-weekly": 7, "github-monthly": 30}
+
+
+def _section_hint(feed_id: str, entries: List[dict], default_hint: str) -> str:
+    """按数据来源选择副标题：降级榜单明确标注，避免与官方 trending 混淆"""
+    source = (entries[0].get("source") or "trending") if entries else "trending"
+    if source == "search" and feed_id in _FALLBACK_DAYS:
+        days = _FALLBACK_DAYS[feed_id]
+        return f"近 {days} 天新建仓库按星数（官方 trending 不可达时的近似榜）"
+    if source == "rsshub":
+        return f"{default_hint} · 经 RSSHub 抓取"
+    return default_hint
 
 # 常见语言徽章配色（与 GitHub 语言色一致，未收录用灰色）
 _LANG_COLORS = {
@@ -146,7 +160,10 @@ def generate_github_page(
 
     sections_html = ""
     for feed_id, (title, hint) in SECTIONS.items():
-        sections_html += _render_section(feed_id, title, hint, page_data.get(feed_id) or [])
+        entries = page_data.get(feed_id) or []
+        sections_html += _render_section(
+            feed_id, title, _section_hint(feed_id, entries, hint), entries,
+        )
 
     page = f"""<!DOCTYPE html>
 <html lang="zh-CN">
