@@ -474,3 +474,100 @@ class SummaryExpandTests(unittest.TestCase):
         self.assertIn("-webkit-line-clamp: 2", html)
         self.assertIn("initSummaryToggle", html)
         self.assertIn("summary-expanded", html)
+
+
+class TopTabTests(unittest.TestCase):
+    """主报告三 tab：财经新闻 / GitHub / AI 新闻"""
+
+    def _report_data(self):
+        return {
+            "stats": [{
+                "word": "华为",
+                "count": 1,
+                "position": 1,
+                "titles": [{
+                    "title": "华为发布新机",
+                    "source_name": "微博",
+                    "url": "https://e.com/a",
+                    "mobile_url": "",
+                    "ranks": [1],
+                    "rank_threshold": 5,
+                    "count": 1,
+                    "time_display": "",
+                }],
+            }],
+            "new_titles": [],
+            "total_new_count": 0,
+            "rss_matched_count": 0,
+            "failed_ids": [],
+        }
+
+    def test_tab_bar_rendered(self):
+        from trendradar.report.html import render_html_content
+
+        html = render_html_content(self._report_data(), total_titles=1)
+        self.assertIn("switchTopTab('top-tab-finance')", html)
+        self.assertIn("switchTopTab('top-tab-github')", html)
+        self.assertIn("switchTopTab('top-tab-ai')", html)
+        self.assertIn('id="top-tab-finance"', html)
+        self.assertIn('id="top-tab-github"', html)
+        self.assertIn('id="top-tab-ai"', html)
+
+    def test_github_panel_embedded(self):
+        from trendradar.report.html import render_html_content
+
+        page_data = {"github-daily": [{
+            "rank": 1, "repo": "a/one", "owner": "a", "description": "d",
+            "language": "Python", "stars": 100, "period_stars": 5,
+            "topics": [], "url": "https://github.com/a/one", "source": "trending",
+        }]}
+        html = render_html_content(
+            self._report_data(), total_titles=1, github_page_data=page_data,
+        )
+        self.assertIn("gh-section", html)
+        self.assertIn("a/one", html)
+
+    def test_github_panel_placeholder_when_no_data(self):
+        from trendradar.report.html import render_html_content
+
+        html = render_html_content(self._report_data(), total_titles=1)
+        self.assertIn("本轮未抓取 GitHub 榜单", html)
+
+    def test_ai_tab_filters_entries(self):
+        from trendradar.report.html import render_html_content
+
+        data = self._report_data()
+        data["stats"][0]["titles"][0]["title"] = "DeepSeek 发布新模型"
+        rss_items = [{"word": "AI", "count": 1, "titles": [{
+            "title": "OpenAI 融资新闻", "url": "https://r.com/1",
+            "source_name": "HN", "summary": "s", "time_display": "",
+        }]}]
+        html = render_html_content(data, total_titles=1, rss_items=rss_items)
+        self.assertIn("🔥 热榜 AI 相关", html)
+        self.assertIn("📡 RSS AI 相关", html)
+        self.assertIn("DeepSeek 发布新模型", html)
+        self.assertIn("OpenAI 融资新闻", html)
+
+    def test_ai_tab_empty_state(self):
+        from trendradar.report.html import render_html_content
+
+        html = render_html_content(self._report_data(), total_titles=1)
+        self.assertIn("本轮新闻中没有 AI 相关内容", html)
+
+
+class AiKeywordTests(unittest.TestCase):
+    """AI 标题关键词匹配"""
+
+    def test_matches(self):
+        from trendradar.report.helpers import is_ai_related
+
+        for t in ["DeepSeek 发布新模型", "AI agent 大战", "大模型降价",
+                  "OpenAI 收购 io", "GPT-5 发布", "智能体元年", "算力概念股走强"]:
+            self.assertTrue(is_ai_related(t), t)
+
+    def test_non_matches(self):
+        from trendradar.report.helpers import is_ai_related
+
+        for t in ["华为发布新机", "said something", "A股三大指数收涨",
+                  "雪碧新品上市", " Certain brands ranked higher"]:
+            self.assertFalse(is_ai_related(t), t)

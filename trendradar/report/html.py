@@ -8,9 +8,146 @@ HTML 报告渲染模块
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Callable
 
-from trendradar.report.helpers import html_escape, html_escape_text, calculate_rank_trend
+from trendradar.report.helpers import (
+    html_escape,
+    html_escape_text,
+    calculate_rank_trend,
+    is_ai_related,
+)
+from trendradar.report.github_page import GH_TAB_CSS, render_github_sections
 from trendradar.utils.time import convert_time_for_display
 from trendradar.ai.formatter import render_ai_analysis_html_rich
+
+# 顶部 tab 切换样式（📰 财经新闻 / 🐙 GitHub / 🤖 AI 新闻 三个面板）
+TOP_TAB_CSS = """
+.top-tab-bar {
+    display: flex; gap: 8px; margin: 0 0 18px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+    padding: 8px; position: sticky; top: 8px; z-index: 100;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.top-tab-btn {
+    flex: 1; border: none; background: transparent; cursor: pointer;
+    font-size: 14px; font-weight: 600; color: #6b7280;
+    padding: 10px 12px; border-radius: 8px; transition: all .15s ease;
+    font-family: inherit;
+}
+.top-tab-btn:hover { background: #f3f4f6; color: #1f2937; }
+.top-tab-btn.top-tab-active {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    color: #fff;
+}
+body.dark-mode .top-tab-bar { background: #1f2937; border-color: #374151; }
+body.dark-mode .top-tab-btn { color: #9ca3af; }
+body.dark-mode .top-tab-btn:hover { background: #374151; color: #f9fafb; }
+body.dark-mode .top-tab-btn.top-tab-active {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    color: #fff;
+}
+.top-tab-panel { display: none; }
+.top-tab-panel.top-tab-active { display: block; }
+.ai-tab-empty {
+    color: #6b7280; font-size: 14px; padding: 24px; text-align: center;
+    background: #fff; border: 1px dashed #e5e7eb; border-radius: 12px;
+}
+body.dark-mode .ai-tab-empty { background: transparent; border-color: #374151; }
+"""
+
+
+def _render_ai_news_panel(
+    report_data: Dict,
+    rss_items: Optional[List[Dict]] = None,
+    rss_new_items: Optional[List[Dict]] = None,
+) -> str:
+    """渲染 AI 新闻 tab：按标题关键词从热榜与 RSS 条目中筛出 AI 相关内容
+
+    复用 RSS 区的条目样式（rss-item/rss-title/rss-summary），按热榜/RSS
+    两个分组展示；URL 去重，避免同一条目在两个分组重复出现。
+    """
+    hot_entries: List[tuple] = []
+    rss_entries: List[tuple] = []
+    seen_urls = set()
+
+    for stat in report_data.get("stats") or []:
+        for title_data in stat.get("titles") or []:
+            title = title_data.get("title", "")
+            url = title_data.get("mobile_url") or title_data.get("url", "")
+            if not is_ai_related(title):
+                continue
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
+            hot_entries.append((title, title_data))
+
+    for stat in list(rss_items or []) + list(rss_new_items or []):
+        for title_data in stat.get("titles") or []:
+            title = title_data.get("title", "")
+            url = title_data.get("url", "")
+            if not is_ai_related(title):
+                continue
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
+            rss_entries.append((title, title_data))
+
+    if not hot_entries and not rss_entries:
+        return ('<div class="ai-tab-empty">本轮新闻中没有 AI 相关内容'
+                '（标题匹配 AI/LLM/GPT/大模型/智能体 等关键词）</div>')
+
+    def render_entry(title: str, title_data: Dict, summary_key: str) -> str:
+        """渲染单条 AI 条目（热榜/RSS 条目结构略有差异）"""
+        url = title_data.get("mobile_url") or title_data.get("url", "")
+        time_display = title_data.get("time_display", "")
+        source_name = title_data.get("source_name", "") or title_data.get("author", "")
+
+        meta_html = ""
+        if time_display:
+            meta_html += f'<span class="rss-time">{html_escape(time_display)}</span>'
+        if source_name:
+            meta_html += f'<span class="rss-author">{html_escape(source_name)}</span>'
+
+        escaped_title = html_escape(title)
+        title_html = (
+            f'<a href="{html_escape(url)}" target="_blank" rel="noopener noreferrer" '
+            f'class="rss-link">{escaped_title}</a>'
+            if url else escaped_title
+        )
+
+        summary = title_data.get("summary", "")
+        if not summary and summary_key == "ai":
+            summary = title_data.get("ai_summary", "")
+        summary_html = (
+            f'<div class="rss-summary">{html_escape_text(f"💬 {summary}")}</div>'
+            if summary else ""
+        )
+
+        return f"""<div class="rss-item">
+                            <div class="rss-meta">{meta_html}</div>
+                            <div class="rss-title">{title_html}</div>{summary_html}
+                        </div>"""
+
+    def render_group(group_title: str, entries: List[tuple], summary_key: str) -> str:
+        """渲染一个分组（热榜/RSS）"""
+        if not entries:
+            return ""
+        items_html = "".join(
+            render_entry(title, td, summary_key)
+            for title, td in entries
+        )
+        return f"""<div class="feed-group">
+                    <div class="feed-header">
+                        <div class="feed-name">{html_escape(group_title)}</div>
+                        <div class="feed-count">{len(entries)} 条</div>
+                    </div>{items_html}
+                </div>"""
+
+    panel = '<div class="rss-section">'
+    panel += render_group("🔥 热榜 AI 相关", hot_entries, "ai")
+    panel += render_group("📡 RSS AI 相关", rss_entries, "rss")
+    panel += "</div>"
+    return panel
 
 
 def render_html_content(
@@ -27,6 +164,7 @@ def render_html_content(
     standalone_data: Optional[Dict] = None,
     ai_analysis: Optional[Any] = None,
     show_new_section: bool = True,
+    github_page_data: Optional[Dict[str, List[dict]]] = None,
 ) -> str:
     """渲染HTML内容
 
@@ -43,6 +181,7 @@ def render_html_content(
         standalone_data: 独立展示区数据（可选），包含 platforms 和 rss_feeds
         ai_analysis: AI 分析结果对象（可选），AIAnalysisResult 实例
         show_new_section: 是否显示新增热点区域
+        github_page_data: GitHub 榜单页面数据（可选），{feed_id: [结构化条目]}
 
     Returns:
         渲染后的 HTML 字符串
@@ -1451,6 +1590,7 @@ def render_html_content(
             body.dark-mode .badge-new {
                 background: linear-gradient(135deg, #be185d, #9333ea);
             }
+""" + TOP_TAB_CSS + GH_TAB_CSS + """
         </style>
     </head>
     <body>
@@ -1459,7 +1599,7 @@ def render_html_content(
             <div class="header">
                 <div class="header-watermark">TrendRadar</div>
                 <div class="save-buttons">
-                    <a class="save-btn" href="../github.html" style="text-decoration:none" title="GitHub Trending 榜单页">🐙 GitHub</a>
+                    <button class="save-btn" type="button" onclick="switchTopTab('top-tab-github')" title="切换到 GitHub 榜单" style="text-decoration:none">🐙 GitHub</button>
                     <button class="toggle-wide-btn" onclick="toggleWideMode()" title="切换宽屏/窄屏">⛶</button>
                     <button class="toggle-dark-btn" onclick="toggleDarkMode()" title="切换暗色/亮色">☽</button>
                     <div class="save-btn-group">
@@ -1600,6 +1740,12 @@ def render_html_content(
             </div>
 
             <div class="content">
+                <div class="top-tab-bar">
+                    <button type="button" class="top-tab-btn top-tab-active" onclick="switchTopTab('top-tab-finance')">📰 财经新闻</button>
+                    <button type="button" class="top-tab-btn" onclick="switchTopTab('top-tab-github')">🐙 GitHub</button>
+                    <button type="button" class="top-tab-btn" onclick="switchTopTab('top-tab-ai')">🤖 AI 新闻</button>
+                </div>
+                <div id="top-tab-finance" class="top-tab-panel top-tab-active">
                 <div class="search-bar">
                     <input type="text" class="search-input" placeholder="搜索新闻标题..." oninput="handleSearch(this.value)">
                 </div>"""
@@ -2242,6 +2388,19 @@ def render_html_content(
             html += content
             has_previous_content = True
 
+    # 关闭财经新闻 tab 面板，追加 GitHub 与 AI 新闻面板
+    github_panel_html = (
+        render_github_sections(github_page_data) if github_page_data else
+        '<div class="gh-empty">本轮未抓取 GitHub 榜单（config.github.enabled 未开启或数据源不可达）</div>'
+    )
+    ai_panel_html = _render_ai_news_panel(report_data, rss_items, rss_new_items)
+
+    html += """
+                </div>"""
+    html += f"""
+                <div id="top-tab-github" class="top-tab-panel">{github_panel_html}</div>
+                <div id="top-tab-ai" class="top-tab-panel">{ai_panel_html}</div>"""
+
     html += """
             </div>
 
@@ -2495,8 +2654,33 @@ def render_html_content(
             }
 
             // 摘要展开/收起：仅对实际被截断（溢出）的摘要启用点击交互
-            function initSummaryToggle() {
-                document.querySelectorAll('.rss-summary, .item-summary').forEach(function(el) {
+            // 顶部 tab 切换（财经新闻 / GitHub / AI 新闻）
+            function switchTopTab(tabId) {
+                document.querySelectorAll('.top-tab-panel').forEach(function(p) {
+                    p.classList.remove('top-tab-active');
+                });
+                document.querySelectorAll('.top-tab-btn').forEach(function(b) {
+                    b.classList.remove('top-tab-active');
+                });
+                var panel = document.getElementById(tabId);
+                if (panel) panel.classList.add('top-tab-active');
+                var order = ['top-tab-finance', 'top-tab-github', 'top-tab-ai'];
+                var idx = order.indexOf(tabId);
+                var btns = document.querySelectorAll('.top-tab-btn');
+                if (idx >= 0 && btns[idx]) btns[idx].classList.add('top-tab-active');
+                try { localStorage.setItem('trendradar-top-tab', tabId); } catch(e) {}
+            }
+
+            function initTopTabRestore() {
+                try {
+                    var saved = localStorage.getItem('trendradar-top-tab');
+                    if (saved && saved !== 'top-tab-finance' && document.getElementById(saved)) {
+                        switchTopTab(saved);
+                    }
+                } catch(e) {}
+            }
+
+            function initSummaryToggle() {                document.querySelectorAll('.rss-summary, .item-summary').forEach(function(el) {
                     if (el.scrollHeight <= el.clientHeight + 2) {
                         el.style.cursor = 'default';
                         return;
@@ -3185,6 +3369,7 @@ def render_html_content(
                 initCollapse();
                 initSummaryToggle();
                 initStandaloneTabs();
+                initTopTabRestore();
 
                 // 键盘快捷键
                 document.addEventListener('keydown', function(e) {

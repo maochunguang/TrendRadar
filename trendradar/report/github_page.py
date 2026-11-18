@@ -1,12 +1,12 @@
 """
-GitHub 榜单页面生成
+GitHub 榜单页面生成与嵌入式渲染
 
-每次运行后从采集到的结构化榜单数据渲染独立页面 output/html/github.html
-（与主报告同风格：浅色主题 + 靛紫渐变头部），经 webadmin 静态托管后
-通过 /html/github.html 访问；主报告头部有入口链接。
+两个使用场景共用同一套渲染函数：
+1. 独立页面 output/html/github.html（每次运行后覆盖，经 webadmin /html/github.html 访问）
+2. 主报告页的 GitHub tab（render_github_sections 被 report/html.py 嵌入调用）
 
-页面只依赖本轮抓取的结构化数据（不依赖存储），榜单缺失时对应区块显示
-"暂无数据" 而不是整页失败。
+CSS 类名统一 gh- 前缀，避免与主报告样式类冲突；GH_TAB_CSS 是与
+render_github_sections 配套的样式（含主报告暗色模式适配），独立页面直接复用。
 """
 
 import html
@@ -37,6 +37,7 @@ def _section_hint(feed_id: str, entries: List[dict], default_hint: str) -> str:
         return f"{default_hint} · 经 RSSHub 抓取"
     return default_hint
 
+
 # 常见语言徽章配色（与 GitHub 语言色一致，未收录用灰色）
 _LANG_COLORS = {
     "Python": "#3572A5",
@@ -61,6 +62,60 @@ _LANG_COLORS = {
     "Lua": "#000080",
 }
 
+# GitHub 卡片样式（类名 gh- 前缀；dark-mode 规则仅在主报告暗色模式下生效）
+GH_TAB_CSS = """
+.gh-section { margin-bottom: 26px; }
+.gh-section-head { display: flex; align-items: baseline; gap: 12px; margin: 0 4px 12px; }
+.gh-section-head h2 { font-size: 19px; font-weight: 700; margin: 0; }
+.gh-section-head .gh-hint { font-size: 12px; color: #6b7280; }
+.gh-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 12px; }
+@media (max-width: 560px) { .gh-grid { grid-template-columns: 1fr; } }
+.gh-card {
+    background: #fff; border-radius: 12px; padding: 14px 16px;
+    border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    transition: box-shadow .15s ease;
+}
+.gh-card:hover { box-shadow: 0 4px 14px rgba(79,70,229,.12); }
+body.dark-mode .gh-card { background: #1f2937; border-color: #374151; }
+body.dark-mode .gh-card:hover { box-shadow: 0 4px 14px rgba(129,140,248,.15); }
+.gh-top { display: flex; align-items: center; gap: 10px; }
+.gh-rank {
+    flex: none; width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #6b7280; background: #f3f4f6;
+}
+body.dark-mode .gh-rank { background: #374151; color: #d1d5db; }
+.gh-rank.gh-r1 { background: linear-gradient(135deg,#fbbf24,#f59e0b); color: #fff; }
+.gh-rank.gh-r2 { background: linear-gradient(135deg,#cbd5e1,#94a3b8); color: #fff; }
+.gh-rank.gh-r3 { background: linear-gradient(135deg,#d97706,#b45309); color: #fff; }
+.gh-name {
+    font-size: 15px; font-weight: 700; color: #4f46e5;
+    text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gh-name:hover { text-decoration: underline; }
+body.dark-mode .gh-name { color: #a5b4fc; }
+.gh-lang { flex: none; font-size: 11px; color: #4b5563; background: #f3f4f6;
+    padding: 3px 8px; border-radius: 999px; white-space: nowrap; display: flex; align-items: center; gap: 5px; }
+body.dark-mode .gh-lang { background: #374151; color: #d1d5db; }
+.gh-lang .gh-dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; }
+.gh-desc {
+    margin-top: 8px; font-size: 13px; color: #4b5563;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+body.dark-mode .gh-desc { color: #9ca3af; }
+.gh-meta { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: #6b7280; }
+.gh-stars { color: #b45309; font-weight: 600; }
+body.dark-mode .gh-stars { color: #fbbf24; }
+.gh-period { color: #059669; font-weight: 600; }
+body.dark-mode .gh-period { color: #34d399; }
+.gh-topic { background: #eef2ff; color: #4338ca; border-radius: 999px; padding: 2px 9px; font-size: 11px; }
+body.dark-mode .gh-topic { background: #312e81; color: #c7d2fe; }
+.gh-empty { color: #9ca3af; font-size: 13px; padding: 14px 16px; background: #fff;
+    border: 1px dashed #e5e7eb; border-radius: 12px; }
+body.dark-mode .gh-empty { background: transparent; border-color: #374151; }
+"""
+
+# 独立页面的完整样式（页面级布局 + 卡片样式）
 _CSS = """
 :root { --accent1: #4f46e5; --accent2: #7c3aed; }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -90,47 +145,8 @@ body {
     background: rgba(255,255,255,.18); padding: 6px 14px; border-radius: 999px;
 }
 .page-header .back:hover { background: rgba(255,255,255,.3); }
-.section { margin-bottom: 28px; }
-.section-head { display: flex; align-items: baseline; gap: 12px; margin: 0 4px 12px; }
-.section-head h2 { font-size: 19px; font-weight: 700; }
-.section-head .hint { font-size: 12px; color: #6b7280; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 12px; }
-@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
-.repo-card {
-    background: #fff; border-radius: 12px; padding: 14px 16px;
-    border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,.04);
-    transition: box-shadow .15s ease;
-}
-.repo-card:hover { box-shadow: 0 4px 14px rgba(79,70,229,.12); }
-.repo-top { display: flex; align-items: center; gap: 10px; }
-.rank {
-    flex: none; width: 28px; height: 28px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 13px; font-weight: 700; color: #6b7280; background: #f3f4f6;
-}
-.rank.r1 { background: linear-gradient(135deg,#fbbf24,#f59e0b); color: #fff; }
-.rank.r2 { background: linear-gradient(135deg,#cbd5e1,#94a3b8); color: #fff; }
-.rank.r3 { background: linear-gradient(135deg,#d97706,#b45309); color: #fff; }
-.repo-name {
-    font-size: 15px; font-weight: 700; color: #4f46e5;
-    text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.repo-name:hover { text-decoration: underline; }
-.lang { flex: none; font-size: 11px; color: #4b5563; background: #f3f4f6;
-    padding: 3px 8px; border-radius: 999px; white-space: nowrap; display: flex; align-items: center; gap: 5px; }
-.lang .dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; }
-.repo-desc {
-    margin-top: 8px; font-size: 13px; color: #4b5563;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-}
-.repo-meta { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: #6b7280; }
-.stars { color: #b45309; font-weight: 600; }
-.period { color: #059669; font-weight: 600; }
-.topic { background: #eef2ff; color: #4338ca; border-radius: 999px; padding: 2px 9px; font-size: 11px; }
-.empty { color: #9ca3af; font-size: 13px; padding: 14px 16px; background: #fff;
-    border: 1px dashed #e5e7eb; border-radius: 12px; }
 .page-footer { text-align: center; font-size: 12px; color: #9ca3af; margin-top: 32px; }
-"""
+""" + GH_TAB_CSS
 
 
 def generate_github_page(
@@ -139,7 +155,7 @@ def generate_github_page(
     timezone: str = "Asia/Shanghai",
 ) -> Optional[str]:
     """
-    生成 GitHub 榜单页面
+    生成 GitHub 榜单独立页面
 
     Args:
         page_data: {feed_id: [结构化榜单条目]}（crawler.github_trending._page_entry 产出）
@@ -158,13 +174,6 @@ def generate_github_page(
         tz = ZoneInfo("Asia/Shanghai")
     generated_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
 
-    sections_html = ""
-    for feed_id, (title, hint) in SECTIONS.items():
-        entries = page_data.get(feed_id) or []
-        sections_html += _render_section(
-            feed_id, title, _section_hint(feed_id, entries, hint), entries,
-        )
-
     page = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -180,7 +189,7 @@ def generate_github_page(
         <span class="sub">生成时间 {generated_at}</span>
         <a class="back" href="../">返回报告</a>
     </div>
-    {sections_html}
+    {render_github_sections(page_data)}
     <div class="page-footer">
         TrendRadar 自动采集 · 数据来源 github.com/trending 与 api.github.com ·
         榜单每轮运行更新
@@ -196,50 +205,69 @@ def generate_github_page(
     return str(target)
 
 
+def render_github_sections(page_data: Dict[str, List[dict]]) -> str:
+    """
+    渲染全部榜单区块（主报告 GitHub tab 与独立页面共用）
+
+    Args:
+        page_data: {feed_id: [结构化榜单条目]}
+
+    Returns:
+        区块 HTML 字符串（无数据显示占位提示）
+    """
+    sections_html = ""
+    for feed_id, (title, hint) in SECTIONS.items():
+        entries = page_data.get(feed_id) or []
+        sections_html += _render_section(
+            feed_id, title, _section_hint(feed_id, entries, hint), entries,
+        )
+    return sections_html
+
+
 def _render_section(feed_id: str, title: str, hint: str, entries: List[dict]) -> str:
     """渲染单个榜单区块；无数据显示占位提示"""
-    head = (f'<div class="section" id="{html.escape(feed_id)}">'
-            f'<div class="section-head"><h2>{html.escape(title)}</h2>'
-            f'<span class="hint">{html.escape(hint)}</span></div>')
+    head = (f'<div class="gh-section" id="{html.escape(feed_id)}">'
+            f'<div class="gh-section-head"><h2>{html.escape(title)}</h2>'
+            f'<span class="gh-hint">{html.escape(hint)}</span></div>')
     if not entries:
-        return head + '<div class="empty">本轮未抓取到数据（数据源不可达或未配置该榜单）</div></div>'
+        return head + '<div class="gh-empty">本轮未抓取到数据（数据源不可达或未配置该榜单）</div></div>'
 
     cards = "".join(_render_card(entry) for entry in entries)
-    return head + f'<div class="grid">{cards}</div></div>'
+    return head + f'<div class="gh-grid">{cards}</div></div>'
 
 
 def _render_card(entry: dict) -> str:
     """渲染单个仓库卡片"""
     rank = _to_int(entry.get("rank"), 0)
-    rank_cls = f" r{rank}" if rank in (1, 2, 3) else ""
+    rank_cls = f" gh-r{rank}" if rank in (1, 2, 3) else ""
 
     lang_html = ""
     language = str(entry.get("language") or "")
     if language:
         color = _LANG_COLORS.get(language, "#9ca3af")
-        lang_html = (f'<span class="lang"><span class="dot" style="background:{color}"></span>'
+        lang_html = (f'<span class="gh-lang"><span class="gh-dot" style="background:{color}"></span>'
                      f'{html.escape(language)}</span>')
 
     stars = _to_int(entry.get("stars"), 0)
     period = _to_int(entry.get("period_stars"), 0)
-    meta_parts = [f'<span class="stars">⭐ {stars:,}</span>']
+    meta_parts = [f'<span class="gh-stars">⭐ {stars:,}</span>']
     if period:
-        meta_parts.append(f'<span class="period">+{period:,}</span>')
+        meta_parts.append(f'<span class="gh-period">+{period:,}</span>')
     for topic in (entry.get("topics") or [])[:4]:
-        meta_parts.append(f'<span class="topic">{html.escape(str(topic))}</span>')
+        meta_parts.append(f'<span class="gh-topic">{html.escape(str(topic))}</span>')
 
     description = str(entry.get("description") or "")
-    desc_html = f'<div class="repo-desc">{html.escape(description)}</div>' if description else ""
+    desc_html = f'<div class="gh-desc">{html.escape(description)}</div>' if description else ""
 
-    return f"""<div class="repo-card">
-    <div class="repo-top">
-        <span class="rank{rank_cls}">{rank or '-'}</span>
-        <a class="repo-name" href="{html.escape(str(entry.get('url') or ''), quote=True)}"
+    return f"""<div class="gh-card">
+    <div class="gh-top">
+        <span class="gh-rank{rank_cls}">{rank or '-'}</span>
+        <a class="gh-name" href="{html.escape(str(entry.get('url') or ''), quote=True)}"
            target="_blank" rel="noopener noreferrer">{html.escape(str(entry.get('repo') or ''))}</a>
         {lang_html}
     </div>
     {desc_html}
-    <div class="repo-meta">{"".join(meta_parts)}</div>
+    <div class="gh-meta">{"".join(meta_parts)}</div>
 </div>"""
 
 

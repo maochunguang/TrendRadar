@@ -70,6 +70,24 @@ def html_escape_text(text: str) -> str:
     return html.escape(text, quote=False)
 
 
+# AI 相关标题匹配：缩写用词边界（避免命中 said/mail 等普通英文词），
+# 中文关键词直接子串匹配；大小写不敏感
+AI_TITLE_RE = re.compile(
+    r"(\bAI\b|\bAGI\b|\bLLM\b|\bGPT\b|GPT-\d|ChatGPT|Claude|Gemini|OpenAI|DeepSeek|"
+    r"Grok|Llama|Qwen|通义|文心|Kimi|豆包|Copilot|Midjourney|Sora|Manus|"
+    r"Ollama|\bMCP\b|\bRAG\b|\bAgent\b|智能体|大模型|人工智能|机器学习|深度学习|"
+    r"神经网络|算力|生成式|多模态)",
+    re.IGNORECASE,
+)
+
+
+def is_ai_related(text: str) -> bool:
+    """判断标题/文本是否与 AI 相关（用于报告 AI 新闻 tab）"""
+    if not isinstance(text, str) or not text:
+        return False
+    return bool(AI_TITLE_RE.search(text))
+
+
 def calculate_rank_trend(rank_timeline=None, ranks=None):
     """根据排名时间线或排名列表计算趋势方向
 

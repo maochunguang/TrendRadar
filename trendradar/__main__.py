@@ -828,6 +828,7 @@ class NewsAnalyzer:
                     "rss_source_failed": self._rss_source_failed,
                 },
                 translate_report_func=translate_report_func,
+                github_page_data=getattr(self, "_github_page_data", None),
             )
 
         return stats, html_file, ai_result, rss_items, standalone_data, rss_new_items
@@ -1308,6 +1309,7 @@ class NewsAnalyzer:
                     rss_data.id_to_name[feed_id] = gh_items[0].feed_name
                 gh_total = sum(len(v) for v in gh_by_feed.values())
                 print(f"[GitHub] 获取 {gh_total} 条榜单数据")
+                self._github_page_data = gh_page
                 self._write_github_page(gh_page)
 
             self._rss_source_total = (

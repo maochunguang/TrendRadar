@@ -158,6 +158,7 @@ def generate_html_report(
     render_html_func: Optional[Callable] = None,
     report_metadata: Optional[Dict] = None,
     translate_report_func: Optional[Callable] = None,
+    github_page_data: Optional[Dict] = None,
 ) -> str:
     """
     生成 HTML 报告
@@ -219,7 +220,8 @@ def generate_html_report(
     # 渲染 HTML 内容
     if render_html_func:
         html_content = render_html_func(
-            report_data, total_titles, mode, update_info
+            report_data, total_titles, mode, update_info,
+            github_page_data=github_page_data,
         )
     else:
         # 默认简单 HTML
