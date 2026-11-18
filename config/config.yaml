@@ -145,9 +145,18 @@ rss:
       enabled: false                  # 禁用
       # max_age_days: 3               # 示例：推送 3 天内的文章（更新较慢的博客）
      
-    - id: "yahoo-finance"
-      name: "雅虎财经"
-      url: "https://finance.yahoo.com/news/rssindex"
+    # 财经资讯源（2026-11-18 实测可用；雅虎财经 RSS 已 403 停用移除）
+    - id: "eastmoney-partner"
+      name: "东方财富资讯"
+      url: "http://rss.eastmoney.com/rss_partener.xml"
+
+    - id: "jiemian"
+      name: "界面新闻"
+      url: "https://a.jiemian.com/index.php?m=article&a=rss"
+
+    - id: "techcrunch"
+      name: "TechCrunch"
+      url: "https://techcrunch.com/feed/"
 
     # 国际时事源（2026-11-17 新增，配合 [国际时事] 词组）
     - id: "bbc-world"
@@ -193,6 +202,18 @@ announcements:
                                       # 示例：["600519", "300750"]，留空 = 全市场最新公告
   categories: []                      # 巨潮公告分类代码（仅 cninfo 生效），留空 = 全部
                                       # 示例：["category_ndbg_szsh"]（年报）
+
+
+# ===============================================================
+# 3.y 同花顺 7×24 财经快讯（可选，复用 RSS 链路）
+# ===============================================================
+# 实时财经快讯（政策/公司/市场），每条自带正文摘要（digest），
+# 转成 RSS 条目参与词组过滤与订阅源（/feed/kw-财经股票.xml 等）。
+# 需保持 rss.enabled: true。显示名固定为"同花顺快讯"。
+# ===============================================================
+newsflash:
+  enabled: true                       # 是否启用快讯采集（true=启用, false=关闭）
+  max_items: 30                       # 每次运行最多采集条数（0=不采集，上限 100）
 
 
 # ===============================================================

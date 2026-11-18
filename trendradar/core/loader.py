@@ -276,6 +276,27 @@ def _load_announcements_config(config_data: Dict) -> Dict:
     }
 
 
+def _load_newsflash_config(config_data: Dict) -> Dict:
+    """加载同花顺 7×24 快讯配置（复用 RSS 链路）"""
+    flash = config_data.get("newsflash", {}) or {}
+    advanced = config_data.get("advanced", {})
+    advanced_rss = advanced.get("rss", {})
+
+    try:
+        max_items = int(flash.get("max_items", 30))
+    except (ValueError, TypeError):
+        max_items = 30
+    max_items = max(0, min(max_items, 100))
+
+    return {
+        "ENABLED": flash.get("enabled", False),
+        "MAX_ITEMS": max_items,
+        "TIMEOUT": advanced_rss.get("timeout", 15),
+        "USE_PROXY": advanced_rss.get("use_proxy", False),
+        "PROXY_URL": advanced_rss.get("proxy_url", ""),
+    }
+
+
 def _load_display_config(config_data: Dict) -> Dict:
     """加载推送内容显示配置"""
     display = config_data.get("display", {})
@@ -687,6 +708,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     # 上市公司公告采集配置（复用 RSS 链路）
     config["ANNOUNCEMENTS"] = _load_announcements_config(config_data)
+
+    # 同花顺 7×24 快讯配置（复用 RSS 链路）
+    config["NEWSFLASH"] = _load_newsflash_config(config_data)
 
     # AI 模型共享配置
     config["AI"] = _load_ai_config(config_data)

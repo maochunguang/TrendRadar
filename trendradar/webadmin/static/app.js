@@ -433,6 +433,11 @@ function renderSources() {
       <p class="card-hint">拉取沪深京上市公司公告，转成 RSS 条目参与词组过滤（如 [财经股票] 的 业绩预告/并购重组/减持），订阅源 /feed/kw-财经股票.xml 会自动带上命中的公告；需保持 RSS 抓取开启。想看全部公告可在「报告与筛选」的独立展示区加入 announcements</p>
       <div id="annFields"></div>
     </div>
+    <div class="card">
+      <h2>同花顺快讯</h2>
+      <p class="card-hint">拉取同花顺 7×24 实时财经快讯（每条自带正文摘要），转成 RSS 条目参与词组过滤；需保持 RSS 抓取开启。想看全部快讯可在「报告与筛选」的独立展示区加入 newsflash</p>
+      <div id="flashFields"></div>
+    </div>
     ${saveBar()}`;
 
   // 标量字段
@@ -454,10 +459,13 @@ function renderSources() {
     { path: "announcements.max_items", label: "公告每次最多采集条数", type: "number", hint: "0 = 不采集" },
     { path: "announcements.stock_pool", label: "自选股票代码（仅东方财富生效）", type: "csvlist", hint: "示例：600519, 300750；留空 = 全市场最新公告" },
     { path: "announcements.categories", label: "巨潮公告分类代码（仅巨潮生效）", type: "csvlist", hint: "示例：category_ndbg_szsh（年报）；留空 = 全部分类" },
+    { path: "newsflash.enabled", label: "启用同花顺快讯", type: "bool", hint: "7×24 实时财经快讯，带正文摘要" },
+    { path: "newsflash.max_items", label: "快讯每次最多采集条数", type: "number", hint: "0 = 不采集，上限 100" },
   ];
   $("platformFields").innerHTML = renderField(scalars[0]) + renderField(scalars[1]);
   $("rssFields").innerHTML = scalars.slice(2, 8).map(renderField).join("");
-  $("annFields").innerHTML = scalars.slice(8).map(renderField).join("");
+  $("annFields").innerHTML = scalars.slice(8, 13).map(renderField).join("");
+  $("flashFields").innerHTML = scalars.slice(13).map(renderField).join("");
   bindFieldEvents(container);
 
   renderSourceList();
