@@ -208,13 +208,15 @@ def _render_other_news_panel(
         if entries:
             hot_groups.append((platform_id, entries))
 
-    # RSS：原文全量 - 已展示 - AI 相关，取前 M 条
+    # RSS：原文全量 - 已展示 - AI 相关 - GitHub 榜单条目（仅 GitHub tab 展示），取前 M 条
     rss_entries = []
     seen_keys = set()
     for item in raw_rss_items or []:
         title = item.get("title", "")
         url = item.get("url", "")
         if not title or title in matched_titles:
+            continue
+        if str(item.get("feed_id", "")).startswith("github-"):
             continue
         if is_ai_related(title):
             continue

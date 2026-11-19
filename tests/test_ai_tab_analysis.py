@@ -187,3 +187,23 @@ class LoaderTabsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GithubIsolationTests(unittest.TestCase):
+    """AI 分析 all 分类同样排除 GitHub 榜单条目"""
+
+    def test_all_excludes_github_feeds(self):
+        fake = SimpleNamespace(
+            _all_hotlist_data={"weibo": {"普通热榜": {"ranks": [1], "url": "", "mobileUrl": ""}}},
+            _raw_rss_items=[
+                {"title": "普通 RSS", "url": "https://r.com/a", "feed_id": "hn"},
+                {"title": "1. a/one", "url": "https://github.com/a/one", "feed_id": "github-daily"},
+            ],
+            _github_page_data={},
+        )
+        stats, rss, label = NewsAnalyzer._build_ai_tab_data(fake, "all", [], [])
+        all_titles = [t["title"] for s in stats for t in s["titles"]]
+        rss_titles = [t["title"] for s in rss for t in s["titles"]]
+        self.assertIn("普通热榜", all_titles)
+        self.assertIn("普通 RSS", rss_titles)
+        self.assertNotIn("1. a/one", rss_titles)

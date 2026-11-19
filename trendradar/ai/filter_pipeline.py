@@ -286,16 +286,24 @@ class AIFilterPipeline:
         if self._rss_enabled:
             all_rss = self.storage.get_all_rss_ids()
 
+            github_filtered = 0
             fresh_rss = []
             for n in all_rss:
                 published_at = n.get("published_at", "")
                 feed_id = n.get("source_id", "")
+                # GitHub 榜单条目只在 GitHub tab 展示，不参与 AI 筛选（省 token，也不污染分类结果）
+                if feed_id.startswith("github-"):
+                    github_filtered += 1
+                    continue
                 max_days = self._feed_max_age_map.get(feed_id, self._default_max_age_days)
                 if self._freshness_enabled and max_days > 0 and published_at:
                     if not is_within_days(published_at, max_days, self._timezone):
                         freshness_filtered_rss += 1
                         continue
                 fresh_rss.append(n)
+
+            if github_filtered:
+                print(f"[AI筛选] 排除 GitHub 榜单条目 {github_filtered} 条（仅在 GitHub tab 展示）")
 
             analyzed_rss = self.storage.get_analyzed_news_ids("rss", interests_file=effective_interests_file)
             pending_rss = [n for n in fresh_rss if n["id"] not in analyzed_rss]
@@ -516,6 +524,9 @@ class AIFilterPipeline:
             rss_titles = []
 
             for item in items:
+                # GitHub 榜单条目只在 GitHub tab 展示（历史已分析条目同样排除）
+                if item.get("source_id", "").startswith("github-"):
+                    continue
                 source_type = item.get("source_type", "hotlist")
 
                 if mode == "current" and latest_time and source_type == "hotlist":

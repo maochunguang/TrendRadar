@@ -631,3 +631,26 @@ class AiKeywordTests(unittest.TestCase):
         for t in ["华为发布新机", "said something", "A股三大指数收涨",
                   "雪碧新品上市", " Certain brands ranked higher"]:
             self.assertFalse(is_ai_related(t), t)
+
+
+class GithubFeedIsolationTests(unittest.TestCase):
+    """GitHub 榜单条目只在 GitHub tab 展示（其余 tab 隔离）"""
+
+    def _report_data(self):
+        return {
+            "stats": [], "new_titles": [], "total_new_count": 0,
+            "failed_ids": [], "rss_matched_count": 0,
+        }
+
+    def test_others_panel_excludes_github_feeds(self):
+        from trendradar.report.html import render_html_content
+
+        raw_rss = [
+            {"title": "普通 RSS 条目", "url": "https://r.com/a", "feed_id": "hacker-news"},
+            {"title": "1. a/one", "url": "https://github.com/a/one", "feed_id": "github-daily",
+             "summary": "⭐ 100"},
+        ]
+        html = render_html_content(self._report_data(), total_titles=0, raw_rss_items=raw_rss)
+        others = html.split('id="top-tab-others"')[1].split('id="top-tab-finance"')[0]
+        self.assertIn("普通 RSS 条目", others)
+        self.assertNotIn("a/one", others)

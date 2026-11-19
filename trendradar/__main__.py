@@ -296,6 +296,9 @@ class NewsAnalyzer:
                 url = item.get("url", "")
                 if not title or title in matched_titles or is_ai_related(title):
                     continue
+                # GitHub 榜单条目只在 GitHub tab 展示
+                if str(item.get("feed_id", "")).startswith("github-"):
+                    continue
                 key = url or title
                 if key in seen_keys:
                     continue
@@ -1584,6 +1587,15 @@ class NewsAnalyzer:
         """
         from trendradar.core.analyzer import count_rss_frequency
 
+        # GitHub 榜单条目只在 GitHub tab 展示：从词组统计/AI 筛选输入/独立展示区
+        # 原始条目（raw_rss_items）中剔除（存储已保存，GitHub 页数据来自抓取结果）
+        github_feed_ids = [fid for fid in rss_data.items if fid.startswith("github-")]
+        for fid in github_feed_ids:
+            rss_data.items.pop(fid, None)
+            rss_data.id_to_name.pop(fid, None)
+        if github_feed_ids:
+            print(f"[GitHub] 榜单条目已隔离（{len(github_feed_ids)} 个 feed 仅在 GitHub tab 展示）")
+
         # 从 display.regions.rss 统一控制 RSS 分析和展示
         rss_display_enabled = self.ctx.config.get("DISPLAY", {}).get("REGIONS", {}).get("RSS", True)
 
@@ -1605,7 +1617,14 @@ class NewsAnalyzer:
         rss_new_urls = set()  # 原始新增 RSS URLs（未经关键词过滤）
 
         # 1. 首先获取原始条目（用于独立展示区，不受 display.regions.rss 影响）
-        # 根据模式获取原始条目
+        # 根据模式获取原始条目；GitHub 榜单条目从展示数据中剔除（仅 GitHub tab 展示）
+        def _strip_github_feeds(items_dict: Dict, id_to_name: Dict):
+            for fid in list(items_dict.keys()):
+                if fid.startswith("github-"):
+                    items_dict.pop(fid, None)
+                    id_to_name.pop(fid, None)
+            return items_dict, id_to_name
+
         if self.report_mode == "incremental":
             new_items_dict = self.storage_manager.detect_new_rss_items(rss_data)
             if new_items_dict:
@@ -1613,10 +1632,12 @@ class NewsAnalyzer:
         elif self.report_mode == "current":
             latest_data = self.storage_manager.get_latest_rss_data(rss_data.date)
             if latest_data:
+                _strip_github_feeds(latest_data.items, latest_data.id_to_name)
                 raw_rss_items = self._convert_rss_items_to_list(latest_data.items, latest_data.id_to_name)
         else:  # daily
             all_data = self.storage_manager.get_rss_data(rss_data.date)
             if all_data:
+                _strip_github_feeds(all_data.items, all_data.id_to_name)
                 raw_rss_items = self._convert_rss_items_to_list(all_data.items, all_data.id_to_name)
 
         # 统计本模式的新鲜度过滤后条目数，不依赖展示开关或关键词匹配结果
