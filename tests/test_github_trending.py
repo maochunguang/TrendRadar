@@ -306,7 +306,8 @@ class FetchGithubTests(unittest.TestCase):
         """配置镜像反代时，直连失败先走镜像（不经 RSSHub/Search）"""
         import unittest.mock as mock
 
-        mirror_resp = mock.Mock(status_code=200, text=TRENDING_HTML)
+        mirror_resp = mock.Mock(status_code=200, text=TRENDING_HTML,
+                                headers={"Content-Type": "text/html; charset=utf-8"})
         mirror_resp.raise_for_status = mock.Mock()
         api_resp = mock.Mock(status_code=200, json=mock.Mock(return_value=SEARCH_PAYLOAD))
         api_resp.raise_for_status = mock.Mock()
@@ -330,6 +331,43 @@ class FetchGithubTests(unittest.TestCase):
         self.assertEqual(items["github-daily"][0].title, "1. NVIDIA/SkillEvaluator")
         self.assertEqual(page["github-daily"][0]["source"], "mirror")
         self.assertIn(AI_FEED_ID, items)
+
+    def test_mirror_json_api_adaptive(self):
+        """mirror_url 指向云服务器 JSON API 时按 Content-Type 自动解析 JSON"""
+        import unittest.mock as mock
+
+        api_payload = {
+            "period": "daily",
+            "repos": [
+                {"rank": 1, "repo": "json/repo", "description": "from cloud api",
+                 "language": "Go", "stars": 500, "period_stars": 40,
+                 "url": "https://github.com/json/repo"},
+            ],
+        }
+        json_resp = mock.Mock(status_code=200, json=mock.Mock(return_value=api_payload),
+                              headers={"Content-Type": "application/json; charset=utf-8"})
+        json_resp.raise_for_status = mock.Mock()
+        api_resp = mock.Mock(status_code=200, json=mock.Mock(return_value=SEARCH_PAYLOAD))
+        api_resp.raise_for_status = mock.Mock()
+
+        def fake_get(url, **kwargs):
+            if "api.github.com" in url:
+                return api_resp
+            if "cloud:8787" in url:
+                return json_resp
+            raise Exception("connection timed out")
+
+        with mock.patch("trendradar.crawler.github_trending.requests.get",
+                        side_effect=fake_get):
+            items, page, errors = fetch_github(
+                self._config(MIRROR_URL="http://my-cloud:8787"), timeout=1,
+            )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(page["github-daily"][0]["source"], "mirror")
+        self.assertEqual(page["github-daily"][0]["repo"], "json/repo")
+        self.assertEqual(page["github-daily"][0]["stars"], 500)
+        self.assertEqual(page["github-daily"][0]["period_stars"], 40)
 
     def test_mirror_url_empty_config(self):
         cfg = _load_github_config({"github": {"mirror_url": " https://x.workers.dev/ "}})

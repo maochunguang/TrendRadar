@@ -195,7 +195,7 @@ def _fetch_trending_period(
         except Exception as e:
             last_err = str(e)
 
-    # 二级：镜像反代（Cloudflare Workers 等，透传 github.com 整站）
+    # 二级：镜像反代（自建云服务器 JSON API 或 Cloudflare Workers 等 HTML 反代）
     if mirror_url:
         try:
             resp = requests.get(
@@ -205,7 +205,11 @@ def _fetch_trending_period(
                 proxies=proxies,
             )
             resp.raise_for_status()
-            repos = _parse_trending_html(resp.text, top_n)
+            content_type = resp.headers.get("Content-Type", "")
+            if "json" in content_type.lower():
+                repos = _parse_api_json(resp.json(), top_n)
+            else:
+                repos = _parse_trending_html(resp.text, top_n)
             if repos:
                 for repo in repos:
                     repo["source"] = "mirror"
@@ -397,6 +401,26 @@ def _parse_search_payload(payload: Dict[str, Any], top_n: int) -> List[dict]:
             "topics": [str(t) for t in (raw.get("topics") or [])][:5],
             "url": _clean_text(raw.get("html_url")) or f"https://github.com/{full_name}",
             "published_at": _github_time_iso(raw.get("created_at")),
+        })
+    return repos
+
+
+def _parse_api_json(payload: Dict[str, Any], top_n: int) -> List[dict]:
+    """解析自建云服务器 JSON API 的响应（deploy/cloud-server/，纯函数）"""
+    raw_list = (payload or {}).get("repos") or []
+    repos: List[dict] = []
+    for raw in raw_list[:top_n]:
+        repo = _clean_text((raw or {}).get("repo"))
+        if not repo or "/" not in repo:
+            continue
+        repos.append({
+            "repo": repo,
+            "owner": repo.split("/", 1)[0],
+            "description": _clean_text(raw.get("description") or ""),
+            "language": _clean_text(raw.get("language") or ""),
+            "stars": _to_int(raw.get("stars"), 0),
+            "period_stars": _to_int(raw.get("period_stars"), 0),
+            "url": _clean_text(raw.get("url")) or f"https://github.com/{repo}",
         })
     return repos
 
