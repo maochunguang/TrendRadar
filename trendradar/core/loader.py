@@ -342,6 +342,8 @@ def _load_github_config(config_data: Dict) -> Dict:
         "AI_TOPICS": ai_topics,
         "AI_DAYS": ai_days,
         "RSSHUB_BASE": str(gh.get("rsshub_base", "") or "").strip().rstrip("/"),
+        # trending 镜像反代地址（如自建 Cloudflare Workers，透传 github.com 整站）
+        "MIRROR_URL": str(gh.get("mirror_url", "") or "").strip().rstrip("/"),
         # GitHub token 为可选密钥，仅从环境变量读取（提升 Search API 限流额度）
         "TOKEN": os.environ.get("GITHUB_TOKEN", ""),
         "TIMEOUT": advanced_rss.get("timeout", 15),

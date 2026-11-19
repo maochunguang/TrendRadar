@@ -472,6 +472,7 @@ function renderSources() {
     { path: "github.ai_topics", label: "AI 新星话题", type: "csvlist", hint: "GitHub topic 列表，如 ai, llm, agent；每话题一次 API 查询" },
     { path: "github.ai_days", label: "AI 新星回看天数", type: "number", hint: "搜索该天数内新建的仓库，1-90，默认 30" },
     { path: "github.rsshub_base", label: "RSSHub 地址（回退通道）", type: "string", hint: "如 http://172.17.0.1:1200；trending 直连失败时自动走 RSSHub" },
+    { path: "github.mirror_url", label: "Trending 镜像反代（推荐）", type: "string", hint: "自建 Cloudflare Workers 反代 github.com（免费，代码见 deploy/cloudflare-worker/），如 https://gh-mirror.xxx.workers.dev；优先生效于 RSSHub 回退" },
   ];
   $("platformFields").innerHTML = renderField(scalars[0]) + renderField(scalars[1]);
   $("rssFields").innerHTML = scalars.slice(2, 8).map(renderField).join("");

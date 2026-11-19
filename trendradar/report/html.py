@@ -533,11 +533,18 @@ def render_html_content(
             }
 
             .word-group {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0 14px;
                 margin-bottom: 40px;
             }
 
             .word-group:first-child {
                 margin-top: 0;
+            }
+
+            .word-group > .word-header {
+                grid-column: 1 / -1;
             }
 
             .word-header {
@@ -936,7 +943,14 @@ def render_html_content(
             }
 
             .feed-group {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0 14px;
                 margin-bottom: 24px;
+            }
+
+            .feed-group > .feed-header {
+                grid-column: 1 / -1;
             }
 
             .feed-group:last-child {
@@ -1205,13 +1219,16 @@ def render_html_content(
             body.wide-mode .header-info { grid-template-columns: repeat(4, 1fr); }
             body.wide-mode .content { padding: 32px 40px; }
 
-            /* 宽屏模式 - RSS feed-group 两列 */
+            /* 宽屏模式 - RSS 分组上下堆叠（条目在 .feed-group 内部两列，不再左右并排展示不同标签） */
             body.wide-mode .rss-feeds-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 24px;
+                display: block;
             }
-            body.wide-mode .feed-group { margin-bottom: 0; }
+            body.wide-mode .feed-group { margin-bottom: 24px; }
+
+            /* 窄屏回退为单列 */
+            @media (max-width: 768px) {
+                .word-group, .feed-group { grid-template-columns: 1fr; }
+            }
 
             /* 宽屏模式 - AI 分析区两列网格 */
             body.wide-mode .ai-section .ai-blocks-grid {

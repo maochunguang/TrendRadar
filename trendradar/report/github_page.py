@@ -33,6 +33,8 @@ def _section_hint(feed_id: str, entries: List[dict], default_hint: str) -> str:
     if source == "search" and feed_id in _FALLBACK_DAYS:
         days = _FALLBACK_DAYS[feed_id]
         return f"近 {days} 天新建仓库按星数（官方 trending 不可达时的近似榜）"
+    if source == "mirror":
+        return f"{default_hint} · 官方数据经镜像反代抓取"
     if source == "rsshub":
         return f"{default_hint} · 经 RSSHub 抓取"
     return default_hint

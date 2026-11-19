@@ -302,6 +302,39 @@ class FetchGithubTests(unittest.TestCase):
         self.assertEqual(page["github-daily"][0]["source"], "search")
         self.assertTrue(any("已降级" in e for e in errors))
 
+    def test_mirror_channel_used_before_rsshub(self):
+        """配置镜像反代时，直连失败先走镜像（不经 RSSHub/Search）"""
+        import unittest.mock as mock
+
+        mirror_resp = mock.Mock(status_code=200, text=TRENDING_HTML)
+        mirror_resp.raise_for_status = mock.Mock()
+        api_resp = mock.Mock(status_code=200, json=mock.Mock(return_value=SEARCH_PAYLOAD))
+        api_resp.raise_for_status = mock.Mock()
+
+        def fake_get(url, **kwargs):
+            if "api.github.com" in url:
+                return api_resp
+            if "workers.dev" in url:
+                return mirror_resp
+            raise Exception("connection timed out")
+
+        with mock.patch("trendradar.crawler.github_trending.requests.get",
+                        side_effect=fake_get):
+            items, page, errors = fetch_github(
+                self._config(MIRROR_URL="https://gh-mirror.workers.dev"),
+                timeout=1,
+            )
+
+        self.assertEqual(errors, [])
+        self.assertIn("github-daily", items)
+        self.assertEqual(items["github-daily"][0].title, "1. NVIDIA/SkillEvaluator")
+        self.assertEqual(page["github-daily"][0]["source"], "mirror")
+        self.assertIn(AI_FEED_ID, items)
+
+    def test_mirror_url_empty_config(self):
+        cfg = _load_github_config({"github": {"mirror_url": " https://x.workers.dev/ "}})
+        self.assertEqual(cfg["MIRROR_URL"], "https://x.workers.dev")
+
     def test_success_builds_items_and_page(self):
         import unittest.mock as mock
 

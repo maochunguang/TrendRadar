@@ -99,12 +99,13 @@ def fetch_github(
     errors: List[str] = []
 
     # ── Trending 日/周/月榜 ──
+    mirror_url = str(gh_config.get("MIRROR_URL") or "").strip().rstrip("/")
     rsshub_base = str(gh_config.get("RSSHUB_BASE") or "").strip().rstrip("/")
     for period in gh_config.get("PERIODS") or ["daily"]:
         feed_id, feed_name, _ = TRENDING_FEEDS.get(period, (f"github-{period}", f"GitHub {period}", period))
         try:
             repos, err = _fetch_trending_period(
-                period, top_n, rsshub_base, str(gh_config.get("TOKEN") or ""), timeout, proxy_url,
+                period, top_n, mirror_url, rsshub_base, str(gh_config.get("TOKEN") or ""), timeout, proxy_url,
             )
         except Exception as e:
             repos, err = [], f"{feed_name}抓取失败: {e}"
@@ -157,12 +158,18 @@ TRENDING_FALLBACK_DAYS = {"daily": 1, "weekly": 7, "monthly": 30}
 def _fetch_trending_period(
     period: str,
     top_n: int,
+    mirror_url: str,
     rsshub_base: str,
     token: str,
     timeout: int,
     proxy_url: str,
 ) -> Tuple[List[dict], Optional[str]]:
-    """抓取单个周期的 Trending 榜：直连 → RSSHub 回退 → Search API 近似降级"""
+    """抓取单个周期的 Trending 榜：直连 → 镜像反代 → RSSHub 回退 → Search API 近似降级
+
+    镜像反代（如自建 Cloudflare Workers）是推荐通道：github.com 在国内网络下
+    稳定性差，通用 gh-proxy 类镜像只代理文件不代理 HTML 页面，自建 Workers
+    反代把 github.com 整站透传（免费 10 万请求/天，见 deploy/cloudflare-worker/）。
+    """
     proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
 
     # 一级：直连（github.com 国内网络下经常不可达，重试一次）
@@ -188,7 +195,28 @@ def _fetch_trending_period(
         except Exception as e:
             last_err = str(e)
 
-    # 二级：回退自建 RSSHub（路由本身也依赖 RSSHub 服务端能访问 github.com）
+    # 二级：镜像反代（Cloudflare Workers 等，透传 github.com 整站）
+    if mirror_url:
+        try:
+            resp = requests.get(
+                mirror_url + "/trending/" + period,
+                timeout=timeout,
+                headers=_HEADERS,
+                proxies=proxies,
+            )
+            resp.raise_for_status()
+            repos = _parse_trending_html(resp.text, top_n)
+            if repos:
+                for repo in repos:
+                    repo["source"] = "mirror"
+                return repos, None
+            mirror_err = "镜像未解析出条目"
+        except Exception as e:
+            mirror_err = str(e)
+    else:
+        mirror_err = "未配置镜像"
+
+    # 三级：回退自建 RSSHub（路由本身也依赖 RSSHub 服务端能访问 github.com）
     if rsshub_base:
         try:
             resp = requests.get(
@@ -209,7 +237,7 @@ def _fetch_trending_period(
     else:
         rsshub_err = "未配置 RSSHub"
 
-    # 三级：Search API 近似榜（api.github.com 可达性远好于网页端）
+    # 四级：Search API 近似榜（api.github.com 可达性远好于网页端）
     days = TRENDING_FALLBACK_DAYS.get(period, 7)
     try:
         repos, search_err = _fetch_search_new_repos(
@@ -219,12 +247,18 @@ def _fetch_trending_period(
             for repo in repos:
                 repo["source"] = "search"
             return repos, (
-                f"Trending {period} 官方榜不可达（直连: {last_err}；RSSHub: {rsshub_err}），"
-                f"已降级为 Search API 近似榜（近 {days} 天新建仓库按星数）"
+                f"Trending {period} 官方榜不可达（直连: {last_err}；镜像: {mirror_err}；"
+                f"RSSHub: {rsshub_err}），已降级为 Search API 近似榜（近 {days} 天新建仓库按星数）"
             )
-        return [], f"Trending {period} 全部通道失败（直连: {last_err}；RSSHub: {rsshub_err}；Search: {search_err}）"
+        return [], (
+            f"Trending {period} 全部通道失败（直连: {last_err}；镜像: {mirror_err}；"
+            f"RSSHub: {rsshub_err}；Search: {search_err}）"
+        )
     except Exception as e:
-        return [], f"Trending {period} 全部通道失败（直连: {last_err}；RSSHub: {rsshub_err}；Search: {e}）"
+        return [], (
+            f"Trending {period} 全部通道失败（直连: {last_err}；镜像: {mirror_err}；"
+            f"RSSHub: {rsshub_err}；Search: {e}）"
+        )
 
 
 def _fetch_search_new_repos(

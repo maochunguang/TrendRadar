@@ -258,6 +258,10 @@ github:
     - llm
     - agent
   ai_days: 30                         # AI 新星回看天数（搜该天数内新建的仓库，1-90）
+  mirror_url: ""                      # trending 镜像反代地址（推荐，优于 RSSHub 回退）
+                                      # 自建 Cloudflare Workers 反代（免费 10 万请求/天，无需域名）：
+                                      #   代码见 deploy/cloudflare-worker/，部署后填 workers.dev 地址
+                                      #   如 https://gh-mirror.your-name.workers.dev
   rsshub_base: ""                     # RSSHub 地址（trending 回退通道，本地留空；NAS 填 http://172.17.0.1:1200）
 
 
