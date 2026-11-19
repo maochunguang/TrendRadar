@@ -808,6 +808,7 @@ function renderAI() {
           ],
         },
         { path: "ai_analysis.max_news_for_analysis", label: "参与分析的新闻上限", type: "number", hint: "控制 token 成本的关键项" },
+        { path: "ai_analysis.tabs", label: "分析范围（报告 tab 分类）", type: "csvlist", hint: "可选 all(全部新闻), finance(财经), ai(AI 新闻), github(GitHub)；多选时按分类分别调用 AI 总结，避免单次超字数；留空 = 分析报告命中内容" },
         { path: "ai_analysis.include_rss", label: "包含 RSS 内容", type: "bool" },
         { path: "ai_analysis.include_standalone", label: "纳入独立展示区数据", type: "bool" },
         { path: "ai_analysis.include_rank_timeline", label: "完整排名轨迹", type: "bool", hint: "更准但多耗 0.5~1 倍 token" },

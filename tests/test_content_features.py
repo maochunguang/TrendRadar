@@ -514,6 +514,18 @@ class TopTabTests(unittest.TestCase):
         self.assertIn('id="top-tab-finance"', html)
         self.assertIn('id="top-tab-github"', html)
         self.assertIn('id="top-tab-ai"', html)
+        # 「其他新闻」已改名「全部新闻」
+        self.assertIn("🗞️ 全部新闻", html)
+
+    def test_search_scoped_to_active_panel(self):
+        from trendradar.report.html import render_html_content
+
+        html = render_html_content(self._report_data(), total_titles=1)
+        # 搜索只作用于当前激活 tab 面板
+        self.assertIn("var activePanel = document.querySelector('.top-tab-panel.top-tab-active')", html)
+        self.assertIn("var scope = activePanel || document", html)
+        # 切换 tab 时重置搜索
+        self.assertIn("handleSearch('')", html)
 
     def test_others_is_default_tab(self):
         from trendradar.report.html import render_html_content
@@ -559,7 +571,7 @@ class TopTabTests(unittest.TestCase):
         html = render_html_content(
             self._report_data(), total_titles=1, all_hotlist_data=all_hotlist,
         )
-        self.assertIn("本轮没有其他新闻", html)
+        self.assertIn("本轮没有全部新闻范围外的内容", html)
 
     def test_github_panel_embedded(self):
         from trendradar.report.html import render_html_content

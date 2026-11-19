@@ -25,6 +25,15 @@ from trendradar.notification import (
 from trendradar.utils.time import DEFAULT_TIMEZONE, is_within_days, calculate_days_old
 from trendradar.utils.text import clean_summary_text
 from trendradar.ai import AIAnalyzer, AIAnalysisResult, create_item_summarizer
+from trendradar.report.helpers import is_ai_related
+
+# AI 分析范围（报告 tab 分类，ai_analysis.tabs 配置）的显示名
+AI_TAB_LABELS = {
+    "all": "🗞️ 全部新闻",
+    "finance": "📰 财经新闻",
+    "ai": "🤖 AI 新闻",
+    "github": "🐙 GitHub 榜单",
+}
 from trendradar.crawler.fulltext import FulltextFetcher, MAX_PER_RUN as MAX_FULLTEXT_PER_RUN, DEFAULT_TIMEOUT as DEFAULT_FULLTEXT_TIMEOUT
 from trendradar.core.scheduler import ResolvedSchedule
 from trendradar.commands import check_all_versions, run_doctor, run_test_notification, handle_status_commands
@@ -203,6 +212,162 @@ class NewsAnalyzer:
                 new_titles and any(len(titles) > 0 for titles in new_titles.values())
             )
             return has_matched_news or has_new_news
+
+    # AI 分析范围（报告 tab 分类）的显示名
+    AI_TAB_LABELS = {
+        "all": "🗞️ 全部新闻",
+        "finance": "📰 财经新闻",
+        "ai": "🤖 AI 新闻",
+        "github": "🐙 GitHub 榜单",
+    }
+
+    def _build_ai_tab_data(
+        self, tab_key: str, stats: List[Dict], rss_stats: Optional[List[Dict]]
+    ) -> Tuple[List[Dict], List[Dict], str]:
+        """构建指定 tab 分类的 AI 分析输入数据
+
+        - finance：报告命中内容（热榜 stats + RSS stats），即财经新闻 tab
+        - ai：命中内容中 AI 相关条目（热榜与 RSS 合并为一个分组）
+        - all：全量热榜与 RSS 原文中未命中且非 AI 相关的部分（与"全部新闻"tab 一致）
+        - github：GitHub 四榜条目
+
+        Returns:
+            (tab_stats, tab_rss_stats, label)
+        """
+        label = AI_TAB_LABELS.get(tab_key, tab_key)
+
+        if tab_key == "finance":
+            return stats or [], rss_stats or [], label
+
+        if tab_key == "ai":
+            hot_titles = [
+                t for s in (stats or []) for t in (s.get("titles") or [])
+                if isinstance(t, dict) and is_ai_related(t.get("title", ""))
+            ]
+            rss_titles = [
+                t for s in (rss_stats or []) for t in (s.get("titles") or [])
+                if isinstance(t, dict) and is_ai_related(t.get("title", ""))
+            ]
+            hot = [{"word": "AI 相关", "count": len(hot_titles), "titles": hot_titles}] if hot_titles else []
+            rss = [{"word": "AI 相关", "count": len(rss_titles), "titles": rss_titles}] if rss_titles else []
+            return hot, rss, label
+
+        if tab_key == "all":
+            # 与"全部新闻"tab 同口径：全量 - 命中 - AI 相关
+            matched_titles = {
+                t.get("title", "")
+                for s in (stats or []) for t in (s.get("titles") or []) if isinstance(t, dict)
+            }
+            shown_urls = set()
+            for s in (stats or []):
+                for t in (s.get("titles") or []):
+                    if isinstance(t, dict):
+                        url = t.get("mobile_url") or t.get("url", "")
+                        if url:
+                            shown_urls.add(url)
+
+            try:
+                from trendradar.core.data import read_all_today_titles as _read_all
+            except ImportError:
+                _read_all = None
+
+            all_stats: List[Dict] = []
+            for platform_id, titles_dict in (getattr(self, "_all_hotlist_data", None) or {}).items():
+                platform_name = platform_id
+                titles = []
+                for title, info in (titles_dict or {}).items():
+                    if not title or title in matched_titles or is_ai_related(title):
+                        continue
+                    info = info or {}
+                    titles.append({
+                        "title": title,
+                        "source_name": platform_name,
+                        "ranks": info.get("ranks") or [],
+                        "url": info.get("url", ""),
+                        "mobile_url": info.get("mobileUrl", ""),
+                    })
+                if titles:
+                    all_stats.append({"word": str(platform_name), "count": len(titles), "titles": titles})
+
+            rss_entries = []
+            seen_keys = set()
+            for item in (getattr(self, "_raw_rss_items", None) or []):
+                title = item.get("title", "")
+                url = item.get("url", "")
+                if not title or title in matched_titles or is_ai_related(title):
+                    continue
+                key = url or title
+                if key in seen_keys:
+                    continue
+                if url and url in shown_urls:
+                    continue
+                seen_keys.add(key)
+                rss_entries.append({
+                    "title": title,
+                    "source_name": item.get("feed_id", ""),
+                    "ranks": [],
+                    "url": url,
+                    "mobile_url": "",
+                })
+            all_rss = [{"word": "未命中词组的 RSS", "count": len(rss_entries), "titles": rss_entries}] if rss_entries else []
+            return all_stats, all_rss, label
+
+        if tab_key == "github":
+            from trendradar.crawler.github_trending import TRENDING_FEEDS, AI_FEED_ID, AI_FEED_NAME
+
+            gh_names = {}
+            for _period, (feed_id, name, _label) in TRENDING_FEEDS.items():
+                gh_names[feed_id] = name
+            gh_names[AI_FEED_ID] = AI_FEED_NAME
+            gh_stats: List[Dict] = []
+            for feed_id, entries in (getattr(self, "_github_page_data", None) or {}).items():
+                titles = []
+                for entry in entries:
+                    stars = entry.get("stars", 0)
+                    summary = f"{entry.get('description', '')}（⭐ {stars:,}）" if entry.get("description") else f"⭐ {stars:,}"
+                    titles.append({
+                        "title": f"{entry.get('rank', '')}. {entry.get('repo', '')}",
+                        "source_name": "GitHub",
+                        "ranks": [],
+                        "url": entry.get("url", ""),
+                        "mobile_url": "",
+                        "summary": summary,
+                    })
+                if titles:
+                    gh_stats.append({
+                        "word": gh_names.get(feed_id, str(feed_id)),
+                        "count": len(titles),
+                        "titles": titles,
+                    })
+            return gh_stats, [], label
+
+        # 未知 tab：回退为财经内容
+        return stats or [], rss_stats or [], label
+
+    def _merge_tab_results(
+        self, results: List[Tuple[str, str, AIAnalysisResult]], ai_mode: str
+    ) -> AIAnalysisResult:
+        """按分类分析结果合并为一个容器结果（tab_results 分组渲染）"""
+        merged = AIAnalysisResult()
+        merged.tab_results = [(label, sub) for _, label, sub in results]
+        merged.success = any(sub.success for _, _, sub in results)
+        failed = [sub.error for _, _, sub in results if not sub.success and sub.error and not sub.skipped]
+        merged.error = "; ".join(failed) if failed else ""
+        skipped_all = not merged.success and all(
+            sub.skipped or not sub.success for _, _, sub in results
+        )
+        merged.skipped = skipped_all
+        if skipped_all:
+            merged.error = "所有分类均无内容或分析失败"
+        merged.total_news = sum(sub.total_news for _, _, sub in results)
+        merged.analyzed_news = sum(sub.analyzed_news for _, _, sub in results)
+        merged.hotlist_count = sum(sub.hotlist_count for _, _, sub in results)
+        merged.rss_count = sum(sub.rss_count for _, _, sub in results)
+        merged.hotlist_analyzed = sum(sub.hotlist_analyzed for _, _, sub in results)
+        merged.rss_analyzed = sum(sub.rss_analyzed for _, _, sub in results)
+        merged.ai_mode = ai_mode
+        merged.include_rss = any(sub.include_rss for _, _, sub in results)
+        return merged
 
     def _prepare_ai_analysis_data(
         self,
@@ -403,6 +568,56 @@ class NewsAnalyzer:
             ai_standalone = standalone_data if ai_mode == mode else None
             if ai_mode != mode and (rss_items or standalone_data):
                 print(f"[AI] 独立分析模式（{ai_mode}）：RSS/独立展示区与推送模式（{mode}）不同源，本次分析仅聚焦热榜")
+
+            # 按 tab 分类分析（ai_analysis.tabs 配置非空）：每分类独立一次 AI 调用，
+            # 输入与对应报告 tab 同口径，避免单次输入过大超 token
+            tabs_config = analysis_config.get("TABS") or []
+            if tabs_config:
+                if ai_standalone:
+                    print("[AI] 分类分析模式下 include_standalone 不生效（独立展示区数据不参与分类分析）")
+                tab_results = []
+                for tab_key in tabs_config:
+                    tab_stats, tab_rss, tab_label = self._build_ai_tab_data(
+                        tab_key, ai_stats, ai_rss_stats,
+                    )
+                    tab_count = (
+                        sum(len(s.get("titles", [])) for s in tab_stats)
+                        + sum(len(s.get("titles", [])) for s in tab_rss)
+                    )
+                    if not tab_count:
+                        print(f"[AI] 分类 {tab_label}：无内容，跳过")
+                        continue
+                    print(f"[AI] 分类分析 {tab_label}：{tab_count} 条，独立调用 AI 总结")
+                    sub_result = analyzer.analyze(
+                        stats=tab_stats,
+                        rss_stats=tab_rss,
+                        report_mode=ai_mode,
+                        report_type=f"{ai_report_type} · {tab_label}",
+                        platforms=platforms,
+                        keywords=keywords,
+                        standalone_data=None,
+                    )
+                    tab_results.append((tab_key, tab_label, sub_result))
+
+                if not tab_results:
+                    return AIAnalysisResult(
+                        success=False,
+                        skipped=True,
+                        error="配置的分析分类均无内容，跳过 AI 分析",
+                    )
+                result = self._merge_tab_results(tab_results, ai_mode)
+
+                if result.success:
+                    print(f"[AI] 分类分析完成：{len(result.tab_results)} 个分类")
+                    if schedule.once_analyze and schedule.period_key:
+                        scheduler = self.ctx.create_scheduler()
+                        date_str = self.ctx.format_date()
+                        scheduler.record_execution(schedule.period_key, "analyze", date_str)
+                elif result.skipped:
+                    print(f"[AI] {result.error}")
+                else:
+                    print(f"[AI] 分析失败: {result.error}")
+                return result
 
             result = analyzer.analyze(
                 stats=ai_stats,

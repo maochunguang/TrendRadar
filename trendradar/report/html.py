@@ -51,6 +51,12 @@ body.dark-mode .top-tab-btn.top-tab-active {
     background: #fff; border: 1px dashed #e5e7eb; border-radius: 12px;
 }
 body.dark-mode .ai-tab-empty { background: transparent; border-color: #374151; }
+.ai-tab-divider {
+    font-size: 15px; font-weight: 700; color: #4338ca;
+    margin: 18px 0 10px; padding-bottom: 8px;
+    border-bottom: 2px solid #eef2ff;
+}
+body.dark-mode .ai-tab-divider { color: #a5b4fc; border-bottom-color: #312e81; }
 """
 
 
@@ -222,8 +228,8 @@ def _render_other_news_panel(
     rss_entries = rss_entries[:_OTHER_NEWS_RSS_LIMIT]
 
     if not hot_groups and not rss_entries:
-        return ('<div class="ai-tab-empty">本轮没有其他新闻'
-                '（全部新闻已被财经词组命中或属于 AI 相关）</div>')
+        return ('<div class="ai-tab-empty">本轮没有全部新闻范围外的内容'
+                '（新闻已被财经词组命中或属于 AI 相关，分别在对应 tab 展示）</div>')
 
     def render_item(item: Dict) -> str:
         title = item.get("title", "")
@@ -1869,7 +1875,7 @@ def render_html_content(
                     <input type="text" class="search-input" placeholder="搜索新闻标题..." oninput="handleSearch(this.value)">
                 </div>
                 <div class="top-tab-bar">
-                    <button type="button" class="top-tab-btn top-tab-active" onclick="switchTopTab('top-tab-others')">🗞️ 其他新闻</button>
+                    <button type="button" class="top-tab-btn top-tab-active" onclick="switchTopTab('top-tab-others')">🗞️ 全部新闻</button>
                     <button type="button" class="top-tab-btn" onclick="switchTopTab('top-tab-finance')">📰 财经新闻</button>
                     <button type="button" class="top-tab-btn" onclick="switchTopTab('top-tab-ai')">🤖 AI 新闻</button>
                     <button type="button" class="top-tab-btn" onclick="switchTopTab('top-tab-github')">🐙 GitHub</button>
@@ -2733,13 +2739,25 @@ def render_html_content(
                     clearTimeout(timer);
                     timer = setTimeout(function() {
                         query = query.toLowerCase();
-                        document.querySelectorAll('.news-item').forEach(function(item) {
+                        // 只搜索当前激活 tab 面板内的条目（按 tab 分类搜索）
+                        var activePanel = document.querySelector('.top-tab-panel.top-tab-active');
+                        var scope = activePanel || document;
+                        scope.querySelectorAll('.news-item').forEach(function(item) {
                             var title = (item.querySelector('.news-title') || {}).textContent || '';
                             item.style.display = (!query || title.toLowerCase().indexOf(query) !== -1) ? '' : 'none';
                         });
-                        document.querySelectorAll('.rss-item').forEach(function(item) {
+                        scope.querySelectorAll('.rss-item').forEach(function(item) {
                             var title = (item.querySelector('.rss-title') || {}).textContent || '';
                             item.style.display = (!query || title.toLowerCase().indexOf(query) !== -1) ? '' : 'none';
+                        });
+                        // 分组内无可见条目时隐藏分组标题（清空搜索时恢复）
+                        scope.querySelectorAll('.feed-group, .word-group').forEach(function(group) {
+                            if (!query) { group.style.display = ''; return; }
+                            var visible = 0;
+                            group.querySelectorAll('.news-item, .rss-item').forEach(function(item) {
+                                if (item.style.display !== 'none') visible++;
+                            });
+                            group.style.display = visible > 0 ? '' : 'none';
                         });
                     }, 200);
                 };
@@ -2788,8 +2806,14 @@ def render_html_content(
             }
 
             // 摘要展开/收起：仅对实际被截断（溢出）的摘要启用点击交互
-            // 顶部 tab 切换（其他新闻 / 财经新闻 / AI 新闻 / GitHub）
+            // 顶部 tab 切换（全部新闻 / 财经新闻 / AI 新闻 / GitHub）
             function switchTopTab(tabId) {
+                // 切换时重置搜索状态，避免上一 tab 的隐藏分组影响新 tab
+                var searchInput = document.querySelector('.search-input');
+                if (searchInput && searchInput.value) {
+                    searchInput.value = '';
+                    handleSearch('');
+                }
                 document.querySelectorAll('.top-tab-panel').forEach(function(p) {
                     p.classList.remove('top-tab-active');
                 });

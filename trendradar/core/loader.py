@@ -444,6 +444,15 @@ def _load_ai_analysis_config(config_data: Dict) -> Dict:
 
     enabled_env = _get_env_bool("AI_ANALYSIS_ENABLED")
 
+    # 分析范围（报告 tab 分类）：all=全部新闻 / finance=财经 / ai=AI 相关 / github=GitHub 榜单
+    # 非空时按分类分别调用 AI 总结（每分类独立一批，避免单次超字数）；空 = 分析报告命中内容（原行为）
+    valid_tabs = {"all", "finance", "ai", "github"}
+    analysis_tabs = []
+    for tab in ai_config.get("tabs", []) or []:
+        tab = str(tab).strip().lower()
+        if tab in valid_tabs and tab not in analysis_tabs:
+            analysis_tabs.append(tab)
+
     return {
         "ENABLED": enabled_env if enabled_env is not None else ai_config.get("enabled", False),
         "LANGUAGE": ai_config.get("language", "Chinese"),
@@ -453,6 +462,7 @@ def _load_ai_analysis_config(config_data: Dict) -> Dict:
         "INCLUDE_RSS": ai_config.get("include_rss", True),
         "INCLUDE_RANK_TIMELINE": ai_config.get("include_rank_timeline", False),
         "INCLUDE_STANDALONE": ai_config.get("include_standalone", False),
+        "TABS": analysis_tabs,
     }
 
 

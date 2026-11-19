@@ -42,6 +42,10 @@ class AIAnalysisResult:
     outlook_strategy: str = ""           # 研判与策略建议
     standalone_summaries: Dict[str, str] = field(default_factory=dict)  # 独立展示区概括 {源ID: 概括}
 
+    # 按报告 tab 分类分析（ai_analysis.tabs 配置非空时使用）
+    # 元素为 (分类显示名, AIAnalysisResult)；容器本身的板块字段为空
+    tab_results: list = field(default_factory=list)
+
     # 基础元数据
     raw_response: str = ""               # 原始响应
     success: bool = False                # 是否成功

@@ -86,7 +86,7 @@ def _format_standalone_summaries(
 
 
 def _render_ai_analysis_markdown_like(
-    result: AIAnalysisResult, standalone_brackets=("[", "]")
+    result: AIAnalysisResult, standalone_brackets=("[", "]"), include_header=True
 ) -> str:
     """Markdown 系渠道的通用渲染骨架（飞书 / 企业微信 / ntfy / Slack 共用）
 
@@ -94,13 +94,25 @@ def _render_ai_analysis_markdown_like(
         standalone_brackets: 独立源点速览中源名两侧的括号字符。飞书卡片 markdown
             须用 HTML 实体 ``("&#91;", "&#93;")`` 避免源名被「链接引用定义」吞掉，
             其余渠道沿用默认裸方括号。
+        include_header: 是否输出"✨ AI 热点分析"标题行（分类模式递归子结果时关闭）
     """
     if not result.success:
         if result.skipped:
             return f"ℹ️ {result.error}"
         return f"⚠️ AI 分析失败: {result.error}"
 
-    lines = ["**✨ AI 热点分析**", ""]
+    # 按 tab 分类分析：逐分类递归渲染
+    if result.tab_results:
+        lines = ["**✨ AI 热点分析（分类分析）**", ""]
+        for label, sub in result.tab_results:
+            lines.append(f"**━━ {label} ━━**")
+            lines.append(_render_ai_analysis_markdown_like(
+                sub, standalone_brackets, include_header=False,
+            ))
+            lines.append("")
+        return "\n".join(lines)
+
+    lines = ["**✨ AI 热点分析**", ""] if include_header else []
 
     if result.core_trends:
         lines.extend(["**核心热点态势**", _format_list_content(result.core_trends), ""])
@@ -150,14 +162,23 @@ def render_ai_analysis_feishu(result: AIAnalysisResult) -> str:
     )
 
 
-def render_ai_analysis_dingtalk(result: AIAnalysisResult) -> str:
+def render_ai_analysis_dingtalk(result: AIAnalysisResult, include_header=True) -> str:
     """渲染为钉钉 Markdown 格式"""
     if not result.success:
         if result.skipped:
             return f"ℹ️ {result.error}"
         return f"⚠️ AI 分析失败: {result.error}"
 
-    lines = ["### ✨ AI 热点分析", ""]
+    # 按 tab 分类分析：逐分类递归渲染
+    if result.tab_results:
+        lines = ["### ✨ AI 热点分析（分类分析）", ""]
+        for label, sub in result.tab_results:
+            lines.append(f"#### ━━ {label} ━━")
+            lines.append(render_ai_analysis_dingtalk(sub, include_header=False))
+            lines.append("")
+        return "\n".join(lines)
+
+    lines = ["### ✨ AI 热点分析", ""] if include_header else []
 
     if result.core_trends:
         lines.extend(
@@ -194,14 +215,23 @@ def render_ai_analysis_dingtalk(result: AIAnalysisResult) -> str:
     return "\n".join(lines)
 
 
-def render_ai_analysis_plain(result: AIAnalysisResult) -> str:
+def render_ai_analysis_plain(result: AIAnalysisResult, include_header=True) -> str:
     """渲染为纯文本格式"""
     if not result.success:
         if result.skipped:
             return result.error
         return f"AI 分析失败: {result.error}"
 
-    lines = ["【✨ AI 热点分析】", ""]
+    # 按 tab 分类分析：逐分类递归渲染
+    if result.tab_results:
+        lines = ["【✨ AI 热点分析（分类分析）】", ""]
+        for label, sub in result.tab_results:
+            lines.append(f"—— {label} ——")
+            lines.append(render_ai_analysis_plain(sub, include_header=False))
+            lines.append("")
+        return "\n".join(lines)
+
+    lines = ["【✨ AI 热点分析】", ""] if include_header else []
 
     if result.core_trends:
         lines.extend(["[核心热点态势]", _format_list_content(result.core_trends), ""])
@@ -228,7 +258,7 @@ def render_ai_analysis_plain(result: AIAnalysisResult) -> str:
     return "\n".join(lines)
 
 
-def render_ai_analysis_telegram(result: AIAnalysisResult) -> str:
+def render_ai_analysis_telegram(result: AIAnalysisResult, include_header=True) -> str:
     """渲染为 Telegram HTML 格式（配合 parse_mode: HTML）
 
     Telegram Bot API 的 HTML 模式仅支持有限标签：
@@ -240,7 +270,16 @@ def render_ai_analysis_telegram(result: AIAnalysisResult) -> str:
             return f"ℹ️ {_escape_html(result.error)}"
         return f"⚠️ AI 分析失败: {_escape_html(result.error)}"
 
-    lines = ["<b>✨ AI 热点分析</b>", ""]
+    # 按 tab 分类分析：逐分类递归渲染
+    if result.tab_results:
+        lines = ["<b>✨ AI 热点分析（分类分析）</b>", ""]
+        for label, sub in result.tab_results:
+            lines.append(f"<b>━━ {label} ━━</b>")
+            lines.append(render_ai_analysis_telegram(sub, include_header=False))
+            lines.append("")
+        return "\n".join(lines)
+
+    lines = ["<b>✨ AI 热点分析</b>", ""] if include_header else []
 
     if result.core_trends:
         lines.extend(["<b>核心热点态势</b>", _escape_html(_format_list_content(result.core_trends)), ""])
@@ -280,7 +319,7 @@ def get_ai_analysis_renderer(channel: str):
     return renderers.get(channel, render_ai_analysis_markdown)
 
 
-def render_ai_analysis_html_rich(result: AIAnalysisResult) -> str:
+def render_ai_analysis_html_rich(result: AIAnalysisResult, include_header=True) -> str:
     """渲染为丰富样式的 HTML 格式（HTML 报告用）"""
     if not result:
         return ""
@@ -298,12 +337,39 @@ def render_ai_analysis_html_rich(result: AIAnalysisResult) -> str:
                     <div class="ai-warning">AI 分析失败: {_escape_html(str(error_msg))}</div>
                 </div>"""
 
-    ai_html = """
-                <div class="ai-section">
+    badge = "分类" if result.tab_results else "AI"
+    title_text = "✨ AI 热点分析（分类分析）" if result.tab_results else "✨ AI 热点分析"
+    header_html = ""
+    if include_header:
+        header_html = f"""
                     <div class="ai-section-header">
-                        <div class="ai-section-title">✨ AI 热点分析</div>
-                        <span class="ai-section-badge">AI</span>
-                    </div>
+                        <div class="ai-section-title">{title_text}</div>
+                        <span class="ai-section-badge">{badge}</span>
+                    </div>"""
+
+    # 按 tab 分类分析：逐分类输出分区标题 + 各自的板块网格
+    if result.tab_results:
+        ai_html = f"""
+                <div class="ai-section">{header_html}"""
+        for label, sub in result.tab_results:
+            ai_html += f"""
+                    <div class="ai-tab-divider">{_escape_html(label)}</div>"""
+            ai_html += _render_ai_blocks_grid(sub)
+        ai_html += """
+                </div>"""
+        return ai_html
+
+    ai_html = f"""
+                <div class="ai-section">{header_html}"""
+    ai_html += _render_ai_blocks_grid(result)
+    ai_html += """
+                </div>"""
+    return ai_html
+
+
+def _render_ai_blocks_grid(result: AIAnalysisResult) -> str:
+    """渲染 AI 分析结果的板块网格（ai-blocks-grid，供单结果与分类子结果复用）"""
+    ai_html = """
                     <div class="ai-blocks-grid">"""
 
     if result.core_trends:
@@ -362,6 +428,5 @@ def render_ai_analysis_html_rich(result: AIAnalysisResult) -> str:
                     </div>"""
 
     ai_html += """
-                    </div>
-                </div>"""
+                    </div>"""
     return ai_html
