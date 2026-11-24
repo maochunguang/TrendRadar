@@ -195,7 +195,7 @@ def _fetch_trending_period(
         except Exception as e:
             last_err = str(e)
 
-    # 二级：镜像反代（自建云服务器 JSON API 或 Cloudflare Workers 等 HTML 反代）
+    # 二级：镜像反代（自建云服务器 JSON API / Gitee 数据仓库 / Cloudflare Workers 等 HTML 反代）
     if mirror_url:
         try:
             resp = requests.get(
@@ -205,10 +205,13 @@ def _fetch_trending_period(
                 proxies=proxies,
             )
             resp.raise_for_status()
-            content_type = resp.headers.get("Content-Type", "")
-            if "json" in content_type.lower():
+            repos = []
+            try:
+                # JSON 优先（云服务器 API / Gitee raw 文件——raw 的 Content-Type
+                # 是 text/plain，但内容是 JSON，requests.json() 不依赖该头）
                 repos = _parse_api_json(resp.json(), top_n)
-            else:
+            except (ValueError, KeyError, TypeError):
+                # 非 JSON 内容（HTML 反代）回退页面解析
                 repos = _parse_trending_html(resp.text, top_n)
             if repos:
                 for repo in repos:

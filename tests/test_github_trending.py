@@ -369,6 +369,43 @@ class FetchGithubTests(unittest.TestCase):
         self.assertEqual(page["github-daily"][0]["stars"], 500)
         self.assertEqual(page["github-daily"][0]["period_stars"], 40)
 
+    def test_mirror_gitee_raw_text_plain_json(self):
+        """Gitee raw 数据仓库：text/plain 的 JSON 内容自适应解析"""
+        import json as jsonlib
+        import unittest.mock as mock
+
+        api_payload = {"repos": [
+            {"rank": 1, "repo": "gitee/sync", "description": "gitee raw",
+             "language": "Python", "stars": 77, "period_stars": 5,
+             "url": "https://github.com/gitee/sync"},
+        ]}
+        raw_resp = mock.Mock(status_code=200,
+                             text=jsonlib.dumps(api_payload, ensure_ascii=False),
+                             headers={"Content-Type": "text/plain"},
+                             json=mock.Mock(return_value=api_payload))
+        raw_resp.raise_for_status = mock.Mock()
+        api_resp = mock.Mock(status_code=200, json=mock.Mock(return_value=SEARCH_PAYLOAD))
+        api_resp.raise_for_status = mock.Mock()
+
+        def fake_get(url, **kwargs):
+            if "api.github.com" in url:
+                return api_resp
+            if "gitee.com" in url:
+                return raw_resp
+            raise Exception("connection timed out")
+
+        with mock.patch("trendradar.crawler.github_trending.requests.get",
+                        side_effect=fake_get):
+            items, page, errors = fetch_github(
+                self._config(MIRROR_URL="https://gitee.com/u/gh-trending-data/raw/main"),
+                timeout=1,
+            )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(page["github-daily"][0]["source"], "mirror")
+        self.assertEqual(page["github-daily"][0]["repo"], "gitee/sync")
+        self.assertEqual(page["github-daily"][0]["stars"], 77)
+
     def test_mirror_url_empty_config(self):
         cfg = _load_github_config({"github": {"mirror_url": " https://x.workers.dev/ "}})
         self.assertEqual(cfg["MIRROR_URL"], "https://x.workers.dev")
