@@ -155,37 +155,6 @@ def fetch_github(
 TRENDING_FALLBACK_DAYS = {"daily": 1, "weekly": 7, "monthly": 30}
 
 
-def _render_trending_page(url: str, timeout: int) -> Tuple[Optional[str], Optional[str]]:
-    """CSR 骨架页 → Playwright 无头浏览器渲染。
-
-    GitHub 对部分流量（含住宅网络）返回新版 trending UI 的客户端渲染骨架页，
-    数据需浏览器执行 JS 后注入；家宽出口渲染后有完整数据（数据中心 IP 为
-    空列表页，渲染也无数据）。需要镜像内 playwright + chromium。
-
-    Returns:
-        (渲染后 HTML, 错误信息)——失败返回 (None, err)
-    """
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        return None, "playwright 未安装（CSR 渲染通道不可用）"
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(args=["--no-sandbox"])
-            page = browser.new_page(user_agent=_HEADERS["User-Agent"])
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000 * 2)
-            try:
-                page.wait_for_selector("article", timeout=30000)
-            except Exception:
-                pass
-            html = page.content()
-            browser.close()
-        return html, None
-    except Exception as e:
-        return None, str(e)
-
-
 def _fetch_trending_period(
     period: str,
     top_n: int,
@@ -217,19 +186,7 @@ def _fetch_trending_period(
                 proxies=proxies,
             )
             resp.raise_for_status()
-            html = resp.text
-            if "Box-row" not in html:
-                # 新版 trending UI 为客户端渲染骨架页（SSR 数据缺失）→
-                # 浏览器渲染注入数据（数据中心 IP 渲染后为空列表，家宽有数据）
-                rendered, render_err = _render_trending_page(
-                    TRENDING_BASE_URL.format(since=period), timeout,
-                )
-                if rendered and "Box-row" in rendered:
-                    print(f"[GitHub] {period}: CSR page rendered via Playwright")
-                    html = rendered
-                else:
-                    print(f"[GitHub] {period}: CSR render unavailable ({render_err})")
-            repos = _parse_trending_html(html, top_n)
+            repos = _parse_trending_html(resp.text, top_n)
             if repos:
                 for repo in repos:
                     repo["source"] = "trending"
