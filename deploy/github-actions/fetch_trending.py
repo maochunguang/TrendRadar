@@ -20,11 +20,14 @@ import re
 import urllib.request
 from datetime import datetime, timezone
 
+# Actions 里注入 github.token（认证请求避免匿名数据中心流量被给验证页）
+GH_TOKEN = os.environ.get("GH_TOKEN", "")
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "trending")
 PERIODS = ["daily", "weekly", "monthly"]
 LIMIT = 25
 
-HEADERS = {
+_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
@@ -32,6 +35,8 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
+if GH_TOKEN:
+    _HEADERS["Authorization"] = f"Bearer {GH_TOKEN}"
 
 # trending 页面结构（与 trendradar/crawler/github_trending.py 同步，2026-11 实测）
 _ROW_SPLIT = '<article class="Box-row">'
@@ -102,13 +107,22 @@ def parse_trending_html(html, since):
 
 
 def fetch(since):
+    """抓取页面：数据中心 IP 被 GitHub 分流到 CSR 新版 UI（无 SSR 数据），
+    需要 Playwright 渲染；本地/住宅网络拿到 SSR 老版页时直接静态解析。"""
     url = f"https://github.com/trending/{since}"
-    req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=25) as resp:
-        html = resp.read().decode("utf-8", "ignore")
-    repos = parse_trending_html(html, since)
-    if not repos:
-        raise RuntimeError(f"no rows parsed for {since} (page structure changed?)")
+    req = urllib.request.Request(url, headers=_HEADERS)
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            html = resp.read().decode("utf-8", "ignore")
+    except Exception as e:
+        print(f"[WARN] {since}: static fetch failed: {e}")
+        html = ""
+
+    if "Box-row" not in html:
+        print(f"[INFO] {since}: SSR page unavailable (empty fetch), rendering with Playwright...")
+        html = render_with_playwright(url)
+
+    repos = _extract(html, since)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "period": since,
@@ -116,6 +130,51 @@ def fetch(since):
         "count": len(repos),
         "repos": repos,
     }
+
+
+def render_with_playwright(url):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--no-sandbox"])
+        ctx = browser.new_context(user_agent=_HEADERS["User-Agent"])
+        page = ctx.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        try:
+            page.wait_for_selector("article", timeout=30000)
+        except Exception:
+            pass
+        html = page.content()
+        # 深度诊断：渲染后可见文本（判断数据是否真的没渲染）+ 新 UI 结构
+        try:
+            text = page.evaluate("document.body.innerText") or ""
+            print(f"[DEBUG] rendered text sample: {text[:600]!r}")
+            cards = page.evaluate("""() => {
+                const h3 = document.querySelectorAll('h3, h2 a[href*="/"]');
+                return Array.from(h3).slice(0, 5).map(e => e.outerHTML.slice(0, 150));
+            }""")
+            print(f"[DEBUG] heading elements: {cards}")
+        except Exception as e:
+            print(f"[DEBUG] text dump failed: {e}")
+        browser.close()
+    return html
+
+
+def _extract(html, since):
+    """解析页面 → 结构化条目；无 Box-row 时打印诊断并抛错（不覆盖旧数据）"""
+    if "Box-row" not in html:
+        print(f"[DEBUG] {since}: len={len(html)}")
+        for pat, label in [
+            (r'<article[^>]{0,120}', "article tags"),
+            (r'<h2[^>]*>.{0,200}', "h2 sample"),
+        ]:
+            found = re.findall(pat, html)
+            print(f"[DEBUG] {label}: {len(found)} hits, first: {found[0][:200] if found else '-'}")
+        links = re.findall(r'href="(/[^"]+/[^"]+)"[^>]*>', html)
+        repoish = [l for l in links if "/" in l[1:] and l.count("/") == 2 and "." not in l.split("/")[-1]][:10]
+        print(f"[DEBUG] repoish links: {repoish}")
+        raise RuntimeError(f"no rows parsed for {since} (page structure changed?)")
+    return parse_trending_html(html, since)
 
 
 def main():

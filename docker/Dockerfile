@@ -64,6 +64,13 @@ COPY trendradar/ ./trendradar/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
+# Playwright + Chromium：GitHub trending 新版 UI 为客户端渲染骨架页（无 SSR 数据），
+# 采集模块检测到 CSR 页时用无头浏览器渲染（家宽网络渲染后有数据）
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/.venv/bin/python playwright && \
+    playwright install --with-deps chromium && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 ENV PATH="/app/.venv/bin:$PATH"
 
 # 复制 entrypoint.sh 并强制转换为 LF 格式
